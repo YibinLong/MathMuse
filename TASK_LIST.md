@@ -10,16 +10,16 @@
 
 **Story:** Set up Expo RN app, TypeScript, UI and drawing foundations
 
-- ⬜ **Task 1.1.1:** Initialize Expo React Native project with TypeScript (`create-expo-app`)
-- ⬜ **Task 1.1.2:** Install core RN deps (`reanimated`, `gesture-handler`)
-- ⬜ **Task 1.1.3:** Install Skia (`@shopify/react-native-skia`) and Expo modules (`expo-av`, `expo-file-system`)
-- ⬜ **Task 1.1.4:** Install libraries (`zustand`, `@supabase/supabase-js`, `nativewind`, `tailwindcss`)
-- ⬜ **Task 1.1.5:** Configure NativeWind (`tailwind.config.js`, `babel.config.js` plugin)
-- ⬜ **Task 1.1.6:** Configure `app.json/app.config` basics (name, icon, splash, permissions)
-- ⬜ **Task 1.1.7:** Create project structure (`/app`, `/components`, `/stores`, `/lib`, `/services`, `/screens`)
-- ⬜ **Task 1.1.8:** Add `.gitignore` entries from PRD
-- ⬜ **Task 1.1.9:** Add `.env` sample with `EXPO_PUBLIC_*` keys from PRD
-- ⬜ **Task 1.1.10:** Validate RN/Expo pairing (`npx expo doctor`) and run dev server
+- ✅ **Task 1.1.1:** Initialize Expo React Native project with TypeScript (`create-expo-app`)
+- ✅ **Task 1.1.2:** Install core RN deps (`reanimated`, `gesture-handler`)
+- ✅ **Task 1.1.3:** Install Skia (`@shopify/react-native-skia`) and Expo modules (`expo-av`, `expo-file-system`)
+- ✅ **Task 1.1.4:** Install libraries (`zustand`, `@supabase/supabase-js`, `nativewind`, `tailwindcss`)
+- ✅ **Task 1.1.5:** Configure NativeWind (`tailwind.config.js`, `babel.config.js` plugin)
+- ✅ **Task 1.1.6:** Configure `app.json/app.config` basics (name, icon, splash, permissions)
+- ✅ **Task 1.1.7:** Create project structure (`/app`, `/components`, `/stores`, `/lib`, `/services`, `/screens`)
+- ✅ **Task 1.1.8:** Add `.gitignore` entries from PRD
+- ❌ **Task 1.1.9:** Add `.env` sample with `EXPO_PUBLIC_*` keys from PRD
+ - ⬜ **Task 1.1.10:** Validate RN/Expo pairing (`npx expo doctor`) and run dev server
 
 **Acceptance:** App compiles and runs on device/simulator, Tailwind works, Skia ready for dev build.
 
@@ -27,8 +27,8 @@
 
 **Story:** Enable native prebuild to use Skia and test on device
 
-- ⬜ **Task 1.2.1:** Prebuild native projects (`npx expo prebuild -p ios -p android`)
-- ⬜ **Task 1.2.2:** Build and run Dev Client (`npx expo run:ios` or `run:android`)
+- ✅ **Task 1.2.1:** Prebuild native projects (`npx expo prebuild -p ios -p android`)
+- 🟦 **Task 1.2.2:** Build and run Dev Client (`npx expo run:ios` or `run:android`)
 - ⬜ **Task 1.2.3:** Verify Skia canvas renders on device
 
 **Acceptance:** Skia canvas renders a basic line on a physical device.
@@ -42,7 +42,7 @@
 - ⬜ **Task 1.3.3:** Enable RLS on `attempts` and `attempt_steps` with policies from PRD
 - ⬜ **Task 1.3.4:** Create private bucket `attempts`; add policy for `user_id/` prefixes via signed URLs
 - ⬜ **Task 1.3.5:** Seed a few sample `problems` rows for testing
-- ⬜ **Task 1.3.6:** Create `lib/supabase.ts` client using `EXPO_PUBLIC_*` envs
+- ✅ **Task 1.3.6:** Create `lib/supabase.ts` client using `EXPO_PUBLIC_*` envs
 
 **Acceptance:** Can read/write attempts/steps as the authenticated user; storage upload works via signed URL.
 
@@ -50,10 +50,10 @@
 
 **Story:** Stub functions and environment for AI calls
 
-- ⬜ **Task 1.4.1:** Scaffold Supabase Edge Functions folder (`supabase/functions/*`)
-- ⬜ **Task 1.4.2:** Create function stubs: `ocr-latex`, `solve-step`, `tts-speak`
+- ✅ **Task 1.4.1:** Scaffold Supabase Edge Functions folder (`supabase/functions/*`)
+- ✅ **Task 1.4.2:** Create function stubs: `ocr-latex`, `solve-step`, `tts-speak`
 - ⬜ **Task 1.4.3:** Configure server env vars: `OPENAI_API_KEY`, `CAMERAMATH_API_KEY`, `APP_BASE_STORAGE_BUCKET`
-- ⬜ **Task 1.4.4:** Add minimal request/response validation and logging
+- ✅ **Task 1.4.4:** Add minimal request/response validation and logging
 
 **Acceptance:** Functions deploy and respond to a simple test request in Supabase dashboard.
 
