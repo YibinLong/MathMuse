@@ -49,4 +49,22 @@ create policy "steps by attempt owner" on public.attempt_steps
     )
   );
 
+-- Storage policies for 'attempts' bucket
+-- Allow users to upload/read/update their own files (path starts with user_id)
+create policy "Users can read their own attempt files"
+  on storage.objects for select
+  using ( bucket_id = 'attempts' AND (storage.foldername(name))[1] = auth.uid()::text );
+
+create policy "Users can insert their own attempt files"
+  on storage.objects for insert
+  with check ( bucket_id = 'attempts' AND (storage.foldername(name))[1] = auth.uid()::text );
+
+create policy "Users can update their own attempt files"
+  on storage.objects for update
+  using ( bucket_id = 'attempts' AND (storage.foldername(name))[1] = auth.uid()::text );
+
+create policy "Users can delete their own attempt files"
+  on storage.objects for delete
+  using ( bucket_id = 'attempts' AND (storage.foldername(name))[1] = auth.uid()::text );
+
 
