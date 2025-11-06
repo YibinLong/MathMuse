@@ -74,17 +74,42 @@ export const useAttemptCanvasStore = create<AttemptCanvasState>((set, get) => ({
 
   endStroke: () => undefined,
 
-  undo: () =>
-    set((s) => ({ activeStrokes: s.activeStrokes.slice(0, -1) })),
+  undo: () => {
+    const state = get();
+    console.log('[UNDO] Before:', {
+      activeStrokes: state.activeStrokes.length,
+      committedLayers: state.committedLayers.length,
+      totalCommitted: state.committedLayers.flat().length
+    });
+    set((s) => ({ activeStrokes: s.activeStrokes.slice(0, -1) }));
+    const after = get();
+    console.log('[UNDO] After:', {
+      activeStrokes: after.activeStrokes.length,
+      committedLayers: after.committedLayers.length,
+      totalCommitted: after.committedLayers.flat().length
+    });
+  },
 
   commitStepLocal: () => {
     const { activeStrokes, stepIndex } = get();
+    console.log('[COMMIT] Before:', {
+      activeStrokes: activeStrokes.length,
+      committedLayers: get().committedLayers.length,
+      stepIndex
+    });
     // Move active strokes to committed layers
     set((s) => ({
       committedLayers: [...s.committedLayers, s.activeStrokes],
       activeStrokes: [],
       stepIndex: s.stepIndex + 1,
     }));
+    const after = get();
+    console.log('[COMMIT] After:', {
+      activeStrokes: after.activeStrokes.length,
+      committedLayers: after.committedLayers.length,
+      totalCommitted: after.committedLayers.flat().length,
+      stepIndex: after.stepIndex
+    });
     return { stepIndex, vectorJson: activeStrokes };
   },
 
