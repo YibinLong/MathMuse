@@ -159,6 +159,11 @@ export default function HandwritingCanvas() {
     if (busy) return;
     if (activeStrokes.length === 0) return;
     setBusy(true);
+    
+    // IMPORTANT: Freeze strokes FIRST, before any async operations
+    // This ensures strokes are committed even if upload fails
+    const { stepIndex: idx, vectorJson } = commitStepLocal();
+    
     try {
       setSnapshotOnlyActive(true);
       let bytes: Uint8Array | null = null;
@@ -178,7 +183,6 @@ export default function HandwritingCanvas() {
       const snapshotMs = Date.now() - t0;
 
       const { userId, attemptId } = await ensureAttemptId();
-      const { stepIndex: idx, vectorJson } = commitStepLocal();
 
       const t1 = Date.now();
       await uploadStepPng({ userId, attemptId, stepIndex: idx, bytes, vectorJson });
