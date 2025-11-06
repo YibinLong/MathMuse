@@ -65,13 +65,13 @@
 
 **Story:** Students can draw with pen/eraser, undo, and line guides
 
-- ⬜ **Task 2.1.1:** Implement Skia canvas component with pen color/width controls
-- ⬜ **Task 2.1.2:** Add eraser mode and undo last stroke
-- ⬜ **Task 2.1.3:** Render ruled line guides to encourage line-by-line writing
-- ⬜ **Task 2.1.4:** Add “Next line” action to freeze current strokes and clear active layer
-- ⬜ **Task 2.1.5:** Capture vector path data (JSON) for each committed step
-- ⬜ **Task 2.1.6:** Limit max resolution and downscale large strokes to control memory/size
-- ⬜ **Task 2.1.7:** Measure render latency on device; basic perf instrumentation
+- ✅ **Task 2.1.1:** Implement Skia canvas component with pen color/width controls
+- ✅ **Task 2.1.2:** Add eraser mode and undo last stroke
+- ✅ **Task 2.1.3:** Render ruled line guides to encourage line-by-line writing
+- ✅ **Task 2.1.4:** Add “Next line” action to freeze current strokes and clear active layer
+- ✅ **Task 2.1.5:** Capture vector path data (JSON) for each committed step
+- ✅ **Task 2.1.6:** Limit max resolution and downscale large strokes to control memory/size
+- ✅ **Task 2.1.7:** Measure render latency on device; basic perf instrumentation
 
 **Acceptance:** User can draw, undo, and commit a line as a step with guides visible.
 
@@ -79,9 +79,9 @@
 
 **Story:** Export each committed step to PNG and prepare upload payload
 
-- ⬜ **Task 2.2.1:** Rasterize committed layer to PNG (≤ 2MB target)
-- ⬜ **Task 2.2.2:** Store temporary PNG locally for retry flow
-- ⬜ **Task 2.2.3:** Free/recycle bitmaps after export to avoid memory spikes
+- ✅ **Task 2.2.1:** Rasterize committed layer to PNG (≤ 2MB target)
+- ✅ **Task 2.2.2:** Store temporary PNG locally for retry flow
+- ✅ **Task 2.2.3:** Free/recycle bitmaps after export to avoid memory spikes
 
 **Acceptance:** Each committed step results in a local PNG file and vector JSON snapshot.
 
@@ -89,9 +89,9 @@
 
 **Story:** Upload PNG to Storage and create `attempt_steps` row
 
-- ⬜ **Task 2.3.1:** Upload PNG to `attempts/<user_id>/<attempt_id>/<step_index>.png`
-- ⬜ **Task 2.3.2:** Create `attempt_steps` row with `png_storage_path`, `vector_json`, `step_index`
-- ⬜ **Task 2.3.3:** Add queued retry and user-facing error states for upload failures
+- ✅ **Task 2.3.1:** Upload PNG to `attempts/<user_id>/<attempt_id>/<step_index>.png`
+- ✅ **Task 2.3.2:** Create `attempt_steps` row with `png_storage_path`, `vector_json`, `step_index`
+- ✅ **Task 2.3.3:** Add queued retry and user-facing error states for upload failures
 
 **Acceptance:** After tapping “Next line,” a step row exists and its PNG is in Storage.
 
