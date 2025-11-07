@@ -37,6 +37,7 @@ interface AttemptCanvasState {
   commitStepLocal: () => { stepIndex: number; vectorJson: Stroke[] };
   clearActive: () => void;
   clearAll: () => void;
+  hydrateFromRemote: (layers: Stroke[][], nextIndex?: number) => void;
 }
 
 export const useAttemptCanvasStore = create<AttemptCanvasState>((set, get) => ({
@@ -116,6 +117,11 @@ export const useAttemptCanvasStore = create<AttemptCanvasState>((set, get) => ({
 
   clearActive: () => set({ activeStrokes: [] }),
   clearAll: () => set({ activeStrokes: [], committedLayers: [], stepIndex: 0 }),
+  hydrateFromRemote: (layers, nextIndex) => set({
+    activeStrokes: [],
+    committedLayers: layers,
+    stepIndex: typeof nextIndex === 'number' ? nextIndex : layers.length,
+  }),
 }));
 
 
