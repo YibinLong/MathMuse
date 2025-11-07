@@ -36,6 +36,7 @@ interface AttemptCanvasState {
   // Commit current step
   commitStepLocal: () => { stepIndex: number; vectorJson: Stroke[] };
   clearActive: () => void;
+  clearAll: () => void;
 }
 
 export const useAttemptCanvasStore = create<AttemptCanvasState>((set, get) => ({
@@ -114,6 +115,7 @@ export const useAttemptCanvasStore = create<AttemptCanvasState>((set, get) => ({
   },
 
   clearActive: () => set({ activeStrokes: [] }),
+  clearAll: () => set({ activeStrokes: [], committedLayers: [], stepIndex: 0 }),
 }));
 
 
