@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, TextInput } from 'react-native';
 import { Canvas, Path as SkPathComponent, Skia, useCanvasRef, Group } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -8,10 +8,17 @@ import { uploadStepPng } from '../services/stepUpload';
 import { supabase } from '../lib/supabase';
 import * as FileSystem from 'expo-file-system/legacy';
 import { invokeOcrLatex } from '../services/stepOCR';
+import { invokeSolveStep, type ValidationResult } from '../services/stepValidate';
 import Constants from 'expo-constants';
 
 const CANVAS_WIDTH = 1920;
 const CANVAS_HEIGHT = 1080;
+
+function splitMultiLineLatex(input: string): string {
+  const raw = (input ?? '').replace(/\r\n|\r|\n/g, '\\\\');
+  const parts = raw.split(/\\\\+/).map((s) => s.trim()).filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : (input ?? '').trim();
+}
 
 function pathFromPoints(points: StrokePoint[]) {
   const p = Skia.Path.Make();
@@ -39,6 +46,8 @@ export default function HandwritingCanvas() {
   const [editLatex, setEditLatex] = useState('');
   const [showOcrPanel, setShowOcrPanel] = useState(true);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [lastValidation, setLastValidation] = useState<ValidationResult | null>(null);
+  const [lastWasProblemSet, setLastWasProblemSet] = useState(false);
   // WHY: Get debug setting from app config (loaded from .env)
   const debug = Constants.expoConfig?.extra?.EXPO_PUBLIC_DEBUG === 'true';
   const log = useCallback((msg: string) => {
@@ -65,6 +74,7 @@ export default function HandwritingCanvas() {
     addPoint,
     undo,
     commitStepLocal,
+    clearAll,
   } = useAttemptCanvasStore();
 
   const ensureStrokeStart = useCallback(() => {
@@ -108,7 +118,7 @@ export default function HandwritingCanvas() {
   }, [addPoint, ensureStrokeStart, log]);
 
   const guides = useMemo(() => {
-    const lines: JSX.Element[] = [];
+    const lines: any[] = [];
     const gap = 120;
     for (let y = gap; y < CANVAS_HEIGHT; y += gap) {
       const p = Skia.Path.Make();
@@ -147,13 +157,34 @@ export default function HandwritingCanvas() {
 
     const { data: existing, error: qErr } = await supabase
       .from('attempts')
-      .select('id')
+      .select('id, problem_id')
       .eq('user_id', userId)
       .eq('status', 'in_progress')
       .limit(1)
       .maybeSingle();
     if (qErr) throw qErr;
-    if (existing?.id) return { userId, attemptId: existing.id };
+    if (existing?.id) {
+      // If we're at a fresh local session (no local steps) but the server attempt
+      // already has a problem or remote steps, complete it and start a new attempt.
+      if (committedLayers.length === 0 && activeStrokes.length === 0) {
+        // Count remote steps for this attempt
+        const { count, error: cErr } = await supabase
+          .from('attempt_steps')
+          .select('id', { count: 'exact', head: true })
+          .eq('attempt_id', existing.id);
+        const hasRemoteSteps = !cErr && typeof count === 'number' ? count > 0 : false;
+        if (existing.problem_id || hasRemoteSteps) {
+          // Complete the old attempt to avoid mixing sessions/indices
+          await supabase.from('attempts').update({ status: 'completed' }).eq('id', existing.id);
+        } else {
+          // No problem and no remote steps — safe to reuse
+          return { userId, attemptId: existing.id };
+        }
+      } else {
+        // We already have local progress; reuse current attempt
+        return { userId, attemptId: existing.id };
+      }
+    }
 
     const { data: ins, error: iErr } = await supabase
       .from('attempts')
@@ -164,14 +195,52 @@ export default function HandwritingCanvas() {
     return { userId, attemptId: ins.id };
   }
 
+  // On mount: if canvas is empty and there is a lingering attempt with a problem but no steps,
+  // clear the problem so the session starts without a pre-set equation.
+  useEffect(() => {
+    (async () => {
+      try {
+        if (activeStrokes.length === 0 && committedLayers.length === 0) {
+          const { data: userData } = await supabase.auth.getUser();
+          const userId = userData.user?.id;
+          if (!userId) return;
+          const { data: att, error: attErr } = await supabase
+            .from('attempts')
+            .select('id, problem_id')
+            .eq('user_id', userId)
+            .eq('status', 'in_progress')
+            .limit(1)
+            .maybeSingle();
+          if (attErr || !att?.id) return;
+          // Count steps; if none, and problem_id exists, unset it
+          const { data: steps, error: stepsErr } = await supabase
+            .from('attempt_steps')
+            .select('id')
+            .eq('attempt_id', att.id)
+            .limit(1);
+          if (!stepsErr && steps && steps.length === 0 && att.problem_id) {
+            await supabase
+              .from('attempts')
+              .update({ problem_id: null })
+              .eq('id', att.id);
+          }
+        }
+      } catch (e) {
+        console.warn('Init reset problem failed:', e);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const onCommit = useCallback(async () => {
     if (busy) return;
     if (activeStrokes.length === 0) return;
     setBusy(true);
     
-    // IMPORTANT: Freeze strokes FIRST, before any async operations
-    // This ensures strokes are committed even if upload fails
-    const { stepIndex: idx, vectorJson } = commitStepLocal();
+    // Snapshot BEFORE moving active strokes into committed layers so the PNG
+    // contains only the current line without prior steps.
+    const idx = stepIndex; // current line's index before commit
+    const vectorJson = activeStrokes; // capture strokes for DB alongside PNG
     
     try {
       setSnapshotOnlyActive(true);
@@ -192,6 +261,9 @@ export default function HandwritingCanvas() {
       }
       if (!bytes) throw new Error('Snapshot failed');
       const snapshotMs = Date.now() - t0;
+
+      // Now commit locally (moves active -> committed and bumps index)
+      const _ignored = commitStepLocal();
 
       const { userId, attemptId } = await ensureAttemptId();
 
@@ -224,6 +296,109 @@ export default function HandwritingCanvas() {
           .eq('id', up.stepId);
         if (updErr) {
           console.warn('Failed to persist OCR fields:', updErr);
+        }
+
+        // STEP VALIDATION: fetch problem text and previous LaTeX, then invoke
+        try {
+          let problemText: string | null = null;
+          // Try to get current attempt's problem
+          const { data: att, error: attErr } = await supabase
+            .from('attempts')
+            .select('problem_id')
+            .eq('id', attemptId)
+            .single();
+          if (attErr) console.warn('attempts query failed, will fallback to first problem:', attErr);
+          if (att?.problem_id) {
+            const { data: prob, error: probErr } = await supabase
+              .from('problems')
+              .select('body')
+              .eq('id', att.problem_id)
+              .single();
+            if (!probErr) problemText = prob?.body ?? null; else console.warn('problem fetch failed:', probErr);
+          }
+          // NOTE: Do NOT fallback to any global/default problem.
+          // Only use attempt's linked problem, or derive from steps below.
+
+          // Fallback: derive problem from first step's OCR (or current step if step 0)
+          if (!problemText) {
+            // Try to use step 0 OCR as the problem for this attempt
+            const { data: firstStep, error: fsErr } = await supabase
+              .from('attempt_steps')
+              .select('ocr_latex')
+              .eq('attempt_id', attemptId)
+              .eq('step_index', 0)
+              .maybeSingle();
+            if (!fsErr && firstStep?.ocr_latex) {
+              problemText = splitMultiLineLatex(firstStep.ocr_latex);
+            }
+          }
+          if (!problemText && idx === 0) {
+            // As last resort for the first step, treat this line as the problem
+            problemText = splitMultiLineLatex(ocr.latex);
+          }
+          // If we derived a problem and the attempt has none, persist it
+          if (problemText && !(att?.problem_id)) {
+            const { data: insProb, error: insProbErr } = await supabase
+              .from('problems')
+              .insert({ title: 'Ad-hoc', body: problemText })
+              .select('id')
+              .single();
+            if (!insProbErr && insProb?.id) {
+              const { error: attUpdErr } = await supabase
+                .from('attempts')
+                .update({ problem_id: insProb.id })
+                .eq('id', attemptId);
+              if (attUpdErr) {
+                console.warn('Failed to set attempt.problem_id:', attUpdErr);
+              }
+            } else if (insProbErr) {
+              console.warn('Failed to persist derived problem:', insProbErr);
+            }
+          }
+
+          if (!problemText) {
+            console.warn('No problem text available; skipping validation');
+          } else {
+            // prevLatex from previous step if exists
+            let prevLatex: string | undefined = undefined;
+            if (idx > 0) {
+              // Defensive: fetch the most recent matching row in case of duplicates
+              const { data: prev, error: prevErr } = await supabase
+                .from('attempt_steps')
+                .select('ocr_latex')
+                .eq('attempt_id', attemptId)
+                .eq('step_index', idx - 1)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              if (!prevErr) prevLatex = prev?.ocr_latex ?? undefined; else console.warn('prev step fetch failed:', prevErr);
+            }
+
+            const processedCurr = splitMultiLineLatex(ocr.latex);
+            if (idx === 0) {
+              // First line: treat as problem capture only; do NOT validate
+              setLastValidation(null);
+              setLastWasProblemSet(true);
+              setCommitMsg('Equation captured as the problem.');
+            } else {
+              const validation = await invokeSolveStep({ prevLatex, currLatex: processedCurr, problem: problemText });
+              setLastWasProblemSet(false);
+              setLastValidation(validation);
+
+              // Persist validation fields
+              const { error: valErr } = await supabase
+                .from('attempt_steps')
+                .update({
+                  validation_status: validation.status,
+                  validation_reason: validation.reason,
+                  solver_metadata: validation.solverMetadata ?? null,
+                })
+                .eq('id', up.stepId);
+              if (valErr) console.warn('Failed to persist validation fields:', valErr);
+            }
+          }
+        } catch (valEx) {
+          console.warn('Validation failed:', valEx);
         }
       } catch (ocrErr: any) {
         console.warn('OCR failed:', ocrErr);
@@ -270,12 +445,66 @@ export default function HandwritingCanvas() {
           <Pressable onPress={undo} className="px-3 py-1 rounded-md" style={{ backgroundColor: '#e2e8f0' }}>
             <Text>Undo</Text>
           </Pressable>
+          <Pressable
+            onPress={async () => {
+              try {
+                // Clear local canvas and UI state
+                clearAll();
+                setLastOcr(null);
+                setLastValidation(null);
+                setCommitMsg(null);
+                setShowOcrPanel(false);
+                setEditOpen(false);
+                setEditLatex('');
+                // Complete current attempt and unset problem so next commit starts fresh
+                const { data: userData } = await supabase.auth.getUser();
+                const userId = userData.user?.id;
+                if (userId) {
+                  const { data: att, error: attErr } = await supabase
+                    .from('attempts')
+                    .select('id')
+                    .eq('user_id', userId)
+                    .eq('status', 'in_progress')
+                    .limit(1)
+                    .maybeSingle();
+                  if (!attErr && att?.id) {
+                    // Mark as completed and remove any linked problem
+                    await supabase
+                      .from('attempts')
+                      .update({ status: 'completed', problem_id: null })
+                      .eq('id', att.id);
+                  }
+                }
+              } catch (e) {
+                console.warn('Clear failed:', e);
+              }
+            }}
+            className="px-3 py-1 rounded-md"
+            style={{ backgroundColor: '#e2e8f0' }}
+          >
+            <Text>Clear</Text>
+          </Pressable>
           <Pressable disabled={busy || activeStrokes.length === 0} onPress={onCommit} className="px-3 py-1 rounded-md" style={{ backgroundColor: busy || activeStrokes.length === 0 ? '#94a3b8' : '#22c55e' }}>
             <Text style={{ color: 'white' }}>{busy ? 'Saving…' : 'Next line'}</Text>
           </Pressable>
           <View className="px-2 py-1 rounded-md" style={{ backgroundColor: '#e2e8f0' }}>
             <Text>Step: {stepIndex}</Text>
           </View>
+          {(lastWasProblemSet || lastValidation) && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 8 }}>
+              <View style={{
+                width: 10,
+                height: 10,
+                borderRadius: 5,
+                backgroundColor: lastWasProblemSet
+                  ? '#6b7280'
+                  : (lastValidation!.status === 'correct_useful' ? '#16a34a' :
+                     lastValidation!.status === 'correct_not_useful' ? '#f59e0b' :
+                     lastValidation!.status === 'incorrect' ? '#dc2626' : '#6b7280')
+              }} />
+              <Text>{lastWasProblemSet ? 'problem set' : lastValidation!.status.replaceAll('_', ' ')}</Text>
+            </View>
+          )}
         </View>
       </View>
 
@@ -407,7 +636,41 @@ export default function HandwritingCanvas() {
             </Pressable>
           </View>
           {!editOpen ? (
-            <Text selectable style={{ marginTop: 4 }}>LaTeX: {lastOcr.latex}{"\n"}(conf: {lastOcr.confidence.toFixed(2)})</Text>
+            <>
+              <Text selectable style={{ marginTop: 4 }}>LaTeX: {lastOcr.latex}{"\n"}(conf: {lastOcr.confidence.toFixed(2)})</Text>
+              {(lastWasProblemSet || lastValidation) && (
+                <View style={{ marginTop: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 5,
+                      backgroundColor: lastWasProblemSet
+                        ? '#6b7280'
+                        : (lastValidation!.status === 'correct_useful' ? '#16a34a' :
+                           lastValidation!.status === 'correct_not_useful' ? '#f59e0b' :
+                           lastValidation!.status === 'incorrect' ? '#dc2626' : '#6b7280')
+                    }} />
+                    <Text>
+                      {lastWasProblemSet ? 'problem set' : lastValidation!.status.replaceAll('_', ' ')}
+                    </Text>
+                  </View>
+                  {!lastWasProblemSet && <Text style={{ color: '#475569', marginTop: 4 }}>{lastValidation!.reason}</Text>}
+                  {!lastWasProblemSet && lastValidation!.status === 'correct_not_useful' && (
+                    <Text style={{ color: '#b45309', marginTop: 4 }}>Nudge: This is correct but doesn’t move the solution forward.</Text>
+                  )}
+                  {!lastWasProblemSet && lastValidation!.status === 'incorrect' && (
+                    <Text style={{ color: '#b45309', marginTop: 4 }}>Hint: Re-check your transformation—try isolating the variable step-by-step.</Text>
+                  )}
+                  {!lastWasProblemSet && lastValidation!.status === 'uncertain' && (
+                    <Text style={{ color: '#b45309', marginTop: 4 }}>Unclear step—rewrite this line more clearly.</Text>
+                  )}
+                  {lastWasProblemSet && (
+                    <Text style={{ color: '#475569', marginTop: 4 }}>Equation captured as the problem.</Text>
+                  )}
+                </View>
+              )}
+            </>
           ) : (
             <TextInput
               value={editLatex}
