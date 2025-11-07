@@ -10,6 +10,52 @@ function approxBytesFromBase64(b64: string): number {
   return Math.floor((len * 3) / 4) - padding;
 }
 
+async function transcribeExactJSON(opts: { client: OpenAI; model: string; imgUrl: string }): Promise<OCRSuccess | null> {
+  const { client, model, imgUrl } = opts;
+  try {
+    const completion = await client.chat.completions.create({
+      model,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a handwriting OCR transcriber for math. TRANSCRIBE EXACTLY what is written into LaTeX. Do NOT solve, correct, simplify, infer missing parts, normalize results, or fix mistakes. Preserve the writer's actual intent even if it is wrong. Never change digits or symbols to make an equation correct. If unsure, output your best guess and reflect uncertainty in the confidence value. Return ONLY JSON: { \"latex\": string, \"confidence\": number }.",
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Transcribe exactly to LaTeX. Do not solve/correct. Return JSON: { \"latex\": string, \"confidence\": number }." },
+            { type: "image_url", image_url: { url: imgUrl } },
+          ],
+        },
+      ],
+      temperature: 0.0,
+    });
+    const content = completion.choices?.[0]?.message?.content ?? "";
+    let parsed: OCRSuccess | null = null;
+    try {
+      parsed = JSON.parse(content) as OCRSuccess;
+    } catch {
+      const match = content.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          parsed = JSON.parse(match[0]) as OCRSuccess;
+        } catch {
+          parsed = null;
+        }
+      }
+    }
+    if (!parsed || typeof parsed.latex !== "string" || typeof parsed.confidence !== "number") {
+      return null;
+    }
+    const confidence = Math.max(0, Math.min(1, parsed.confidence));
+    return { latex: parsed.latex.trim(), confidence };
+  } catch {
+    return null;
+  }
+}
+
 async function handle(req: Request): Promise<Response> {
   console.log("[OCR Edge Function] Request received");
   try {
@@ -52,61 +98,19 @@ async function handle(req: Request): Promise<Response> {
       ? `data:image/png;base64,${imageBase64}`
       : (typeof imageUrl === "string" ? imageUrl : "");
 
-    // Ask model to strictly return JSON with { latex, confidence }
-    console.log("[OCR] Calling OpenAI GPT-4o Vision API...");
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o",
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a handwriting OCR engine for mathematics. Extract ONLY the LaTeX that represents the handwritten expression/step. Return a compact JSON object with keys: latex (string LaTeX) and confidence (number 0..1). Avoid extra text.",
-        },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "Please extract and normalize to valid LaTeX. Return JSON: { \"latex\": string, \"confidence\": number }." },
-            { type: "image_url", image_url: { url: imgUrl } },
-          ],
-        },
-      ],
-      temperature: 0.0,
-    });
-
-    console.log("[OCR] OpenAI API call successful");
-    const content = completion.choices?.[0]?.message?.content ?? "";
-    console.log("[OCR] Raw response from OpenAI:", content);
-    
-    let parsed: OCRSuccess | null = null;
-    try {
-      parsed = JSON.parse(content) as OCRSuccess;
-      console.log("[OCR] Successfully parsed JSON response");
-    } catch (parseErr) {
-      console.error("[OCR] Failed to parse JSON, trying fallback...", parseErr);
-      // Fallback: try to extract JSON object via a loose match
-      const match = content.match(/\{[\s\S]*\}/);
-      if (match) {
-        try {
-          parsed = JSON.parse(match[0]) as OCRSuccess;
-          console.log("[OCR] Fallback parse succeeded");
-        } catch {
-          parsed = null;
-          console.error("[OCR] Fallback parse also failed");
-        }
-      }
+    // Primary attempt with fallback model
+    console.log("[OCR] Calling OpenAI Vision API...");
+    let result = await transcribeExactJSON({ client, model: "gpt-4o", imgUrl });
+    if (!result) {
+      console.warn("[OCR] Primary model failed to return valid JSON; trying gpt-4o-mini…");
+      result = await transcribeExactJSON({ client, model: "gpt-4o-mini", imgUrl });
     }
-
-    if (!parsed || typeof parsed.latex !== "string" || typeof parsed.confidence !== "number") {
-      const body: OCRError = { error: "parse_failed", message: "Model did not return expected JSON" };
+    if (!result) {
+      const body: OCRError = { error: "parse_failed", message: "Model did not return expected JSON after retries" };
       return new Response(JSON.stringify(body), { status: 422, headers: { "content-type": "application/json" } });
     }
-
-    // Clamp confidence to [0,1]
-    const confidence = Math.max(0, Math.min(1, parsed.confidence));
-    const body: OCRSuccess = { latex: parsed.latex.trim(), confidence };
-    console.log("[OCR] Returning success response - LaTeX:", body.latex, "Confidence:", body.confidence);
-    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    console.log("[OCR] Returning success response - LaTeX:", result.latex, "Confidence:", result.confidence);
+    return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
   } catch (e: any) {
     console.error("[OCR] Exception caught:", e);
     console.error("[OCR] Error name:", e?.name);
