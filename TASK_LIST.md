@@ -154,19 +154,19 @@
 
 **Story:** Escalate guidance from nudge → hint → micro-step
 
-- ⬜ **Task 5.1.1:** Define thresholds (e.g., N incorrect steps, 20s idle) to trigger hints
-- ⬜ **Task 5.1.2:** Author hint templates per status/context
-- ⬜ **Task 5.1.3:** Persist `hint_level` and `hint_text` on `attempt_steps`
+- ✅ **Task 5.1.1:** Define thresholds (e.g., N incorrect steps) to trigger hints
+- ✅ **Task 5.1.2:** Author hint templates per status/context
+- ✅ **Task 5.1.3:** Persist `hint_level` and `hint_text` on `attempt_steps`
 
-**Acceptance:** Repeated mistakes or idle time produce appropriate hints with stored metadata.
+**Acceptance:** Repeated mistakes produce appropriate hints with stored metadata.
 
 ### Epic 5.2: TTS via Edge Function `tts-speak`
 
-**Story:** Optional short voice playback of hints
+**Story:** Optional short voice playback of hints (with alloy voice)
 
-- ⬜ **Task 5.2.1:** Implement `POST /tts-speak` using OpenAI 4o-mini-tts
-- ⬜ **Task 5.2.2:** Store audio in Storage; return `audioUrl`; persist `tts_audio_path`
-- ⬜ **Task 5.2.3:** Play audio in app via `expo-av`; add text fallback on failure
+- ✅ **Task 5.2.1:** Implement `POST /tts-speak` using OpenAI 4o-mini-tts
+- ✅ **Task 5.2.2:** Store audio in Storage; return `audioUrl`; persist `tts_audio_path`
+- ✅ **Task 5.2.3:** Play audio in app via `expo-av`; add text fallback on failure
 
 **Acceptance:** Tapping play on a hint speaks ≤5s audio reliably.
 
@@ -178,9 +178,9 @@
 
 **Story:** Users can sign up/in and maintain a session
 
-- ⬜ **Task 6.1.1:** Wire `supabase-js` client and session store (Zustand)
-- ⬜ **Task 6.1.2:** Build sign-in/sign-up UI with email/password and magic link
-- ⬜ **Task 6.1.3:** Gate app screens by auth state; session refresh handling
+- ✅ **Task 6.1.1:** Wire `supabase-js` client and session store (Zustand)
+- ✅ **Task 6.1.2:** Build sign-in/sign-up UI with email/password
+- ✅ **Task 6.1.3:** Gate app screens by auth state; session refresh handling
 
 **Acceptance:** Authenticated users can access problems and attempts; sessions persist across app restarts.
 
@@ -188,10 +188,10 @@
 
 **Story:** Create, resume, and complete attempts with steps persisted
 
-- ⬜ **Task 6.2.1:** `Start Attempt` flow linking to a `problem`
-- ⬜ **Task 6.2.2:** Load existing attempts and resume with prior steps
-- ⬜ **Task 6.2.3:** Mark attempt `status` complete; set `updated_at`
-- ⬜ **Task 6.2.4:** Ensure RLS compliance on all reads/writes by `auth.uid()`
+- ✅ **Task 6.2.1:** `Start Attempt` flow linking to a `problem`
+- ✅ **Task 6.2.2:** Load existing attempts and resume with prior steps
+- ✅ **Task 6.2.3:** Mark attempt `status` complete; set `updated_at`
+- ✅ **Task 6.2.4:** Ensure RLS compliance on all reads/writes by `auth.uid()`
 
 **Acceptance:** Attempts and steps are fully owned by users and resumable.
 
