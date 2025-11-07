@@ -129,10 +129,10 @@
 
 **Story:** Compare previous and current LaTeX with the problem and assess
 
-- ⬜ **Task 4.1.1:** Implement `POST /solve-step` with `{ prevLatex, currLatex, problem }`
-- ⬜ **Task 4.1.2:** Integrate CameraMath API; capture `solverMetadata`
-- ⬜ **Task 4.1.3:** Add LLM reasoning fallback for ambiguous cases
-- ⬜ **Task 4.1.4:** Map outcomes to `validation_status` and `validation_reason`
+- ✅ **Task 4.1.1:** Implement `POST /solve-step` with `{ prevLatex, currLatex, problem }`
+- ✅ **Task 4.1.2:** Integrate CameraMath API; capture `solverMetadata`
+- ✅ **Task 4.1.3:** Add LLM reasoning fallback for ambiguous cases
+- ✅ **Task 4.1.4:** Map outcomes to `validation_status` and `validation_reason`
 
 **Acceptance:** Function returns one of `correct_useful | correct_not_useful | incorrect | uncertain` with reason.
 
@@ -140,9 +140,9 @@
 
 **Story:** Provide clear per-step feedback and guidance entry points
 
-- ⬜ **Task 4.2.1:** Render badges for step status (green check, warning, error)
-- ⬜ **Task 4.2.2:** Show short nudge copy for `correct_not_useful` and `incorrect`
-- ⬜ **Task 4.2.3:** Surface `uncertain` state with actionable rewrite prompt
+- ✅ **Task 4.2.1:** Render badges for step status (green check, warning, error)
+- ✅ **Task 4.2.2:** Show short nudge copy for `correct_not_useful` and `incorrect`
+- ✅ **Task 4.2.3:** Surface `uncertain` state with actionable rewrite prompt
 
 **Acceptance:** Users see immediate, comprehensible feedback for each committed step.
 
