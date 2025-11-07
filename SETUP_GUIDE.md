@@ -1,202 +1,273 @@
-# 🚀 Quick Setup Guide - Fixing "Next Line" and Authentication
+# 🚀 MathMuse Setup Guide
 
-## ✅ What Was Fixed
-
-### Bug Fix #1: Strokes Now Freeze Immediately
-**Problem:** When you pressed "Next Line," if the upload failed (no auth), strokes weren't frozen. You could undo everything.
-
-**Solution:** I moved the `commitStepLocal()` call to run **before** any async operations. Now strokes freeze immediately when you press "Next Line," regardless of whether Supabase upload succeeds.
-
-**Code change in `HandwritingCanvas.tsx`:**
-```typescript
-// OLD: commitStepLocal() only ran if upload succeeded
-const { userId, attemptId } = await ensureAttemptId();
-const { stepIndex: idx, vectorJson } = commitStepLocal(); // ← could error before this
-
-// NEW: commitStepLocal() runs FIRST, before any async operations
-const { stepIndex: idx, vectorJson } = commitStepLocal(); // ← happens immediately
-// ... then upload happens ...
-```
-
-### Bug Fix #2: Authentication Added
-**Problem:** No way to log in, so "No authenticated user" error occurred.
-
-**Solution:** Created an `AuthScreen` component that lets you sign in/sign up with email and password.
+Complete guide to set up MathMuse from scratch and fix the OCR issue.
 
 ---
 
-## 📋 Setup Steps (Do This Now!)
+## 📋 Prerequisites
 
-### Step 1: Create `.env` File
+1. Node.js 18+ installed
+2. Expo CLI (`npm install -g expo-cli`)
+3. A Supabase account ([supabase.com](https://supabase.com))
+4. An OpenAI account ([platform.openai.com](https://platform.openai.com))
 
-In your project root, create a file named `.env` with this content:
+---
 
-```env
-EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-EXPO_PUBLIC_APP_ENV=dev
-EXPO_PUBLIC_DEBUG=true
+## 🔧 Step-by-Step Setup
+
+### **Step 1: Create a Supabase Project**
+
+1. Go to [supabase.com](https://supabase.com) and sign in
+2. Click **"New Project"**
+3. Fill in:
+   - **Name**: `MathMuse` (or whatever you like)
+   - **Database Password**: Create a strong password (save it somewhere safe!)
+   - **Region**: Choose closest to you
+4. Click **"Create new project"** and wait ~2 minutes
+
+---
+
+### **Step 2: Get Your Supabase Credentials**
+
+1. In your Supabase project, click **Settings** (⚙️ icon) in the left sidebar
+2. Click **"API"**
+3. You'll see two important values:
+   - **Project URL** (example: `https://abcdefgh.supabase.co`)
+   - **Project API keys** → Copy the **`anon`** **`public`** key (starts with `eyJ...`)
+
+**Keep these handy - you'll need them next!**
+
+---
+
+### **Step 3: Create Your `.env` File**
+
+1. In your MathMuse project folder, **copy** the `.env.example` file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Open** the new `.env` file and replace the placeholder values:
+   ```env
+   EXPO_PUBLIC_SUPABASE_URL=https://abcdefgh.supabase.co
+   EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+   EXPO_PUBLIC_APP_ENV=dev
+   EXPO_PUBLIC_DEBUG=true
+   ```
+
+3. **Save** the file
+
+---
+
+### **Step 4: Set Up the Supabase Database**
+
+1. In your Supabase dashboard, click **"SQL Editor"** in the left sidebar
+2. Click **"New query"**
+3. Open the file `supabase/sql/schema.sql` in your project
+4. **Copy all the SQL code** from that file
+5. **Paste** it into the Supabase SQL Editor
+6. Click **"Run"** (or press `Ctrl/Cmd + Enter`)
+
+This creates the necessary tables: `problems`, `attempts`, and `attempt_steps`.
+
+---
+
+### **Step 5: Set Up Supabase Storage**
+
+1. In your Supabase dashboard, click **"Storage"** in the left sidebar
+2. Click **"Create a new bucket"**
+3. Fill in:
+   - **Name**: `attempts`
+   - **Public**: Leave it **OFF** (private bucket)
+4. Click **"Create bucket"**
+
+---
+
+### **Step 6: Get Your OpenAI API Key**
+
+1. Go to [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+2. Sign in (or create an account)
+3. Click **"Create new secret key"**
+4. Give it a name like `MathMuse OCR`
+5. **Copy the key** (starts with `sk-...`) - you won't be able to see it again!
+
+**⚠️ IMPORTANT:** You need to add credits to your OpenAI account for the API to work:
+- Go to [platform.openai.com/settings/organization/billing](https://platform.openai.com/settings/organization/billing)
+- Add at least $5-10 to start
+
+---
+
+### **Step 7: Configure OpenAI Key in Supabase (CRITICAL!)**
+
+**This is where most people get stuck!** The OpenAI key needs to be on the **server** (Supabase Edge Functions), **NOT** in your `.env` file.
+
+#### **Option A: Via Supabase Dashboard (Easier)**
+1. In your Supabase dashboard, click **"Edge Functions"** in the left sidebar
+2. Click **"Settings"** or **"Manage secrets"**
+3. Add a new secret:
+   - **Name**: `OPENAI_API_KEY`
+   - **Value**: `sk-proj-...` (paste your OpenAI key)
+4. Click **"Save"**
+
+#### **Option B: Via Supabase CLI**
+```bash
+# Login to Supabase
+supabase login
+
+# Link your project
+supabase link --project-ref your-project-id
+
+# Set the secret
+supabase secrets set OPENAI_API_KEY=sk-proj-your-key-here
 ```
 
-### Step 2: Get Supabase Credentials
+---
 
-1. Go to [supabase.com](https://supabase.com) and sign in (or create account)
-2. Create a new project (or use existing)
-3. Go to **Settings** → **API**
-4. Copy **Project URL** → replace `your_supabase_url` in `.env`
-5. Copy **anon/public key** → replace `your_supabase_anon_key` in `.env`
+### **Step 8: Deploy Edge Functions**
 
-### Step 3: Run Database Schema
+The OCR code lives in a "serverless function" that runs on Supabase's servers. You need to deploy it:
 
-In your Supabase dashboard:
-1. Go to **SQL Editor**
-2. Click **New query**
-3. Copy and paste the SQL from `supabase/sql/schema.sql`
-4. Click **Run**
+1. **Install Supabase CLI** (if not already installed):
+   ```bash
+   npm install -g supabase
+   ```
 
-### Step 4: Create Storage Bucket
+2. **Login to Supabase**:
+   ```bash
+   supabase login
+   ```
 
-In your Supabase dashboard:
-1. Go to **Storage**
-2. Click **New bucket**
-3. Name it: `attempts`
-4. Privacy: **Private** (recommended)
-5. Click **Create bucket**
+3. **Link your project** (get project-ref from Settings → General):
+   ```bash
+   supabase link --project-ref your-project-id
+   ```
 
-### Step 4.5: Add Storage Policies
+4. **Deploy the OCR function**:
+   ```bash
+   supabase functions deploy ocr-latex
+   ```
 
-Go back to **SQL Editor** and run this to allow users to upload their own files:
+   You should see:
+   ```
+   ✓ Function deployed successfully
+   ```
 
-```sql
--- Storage policies for 'attempts' bucket
-create policy "Users can read their own attempt files"
-  on storage.objects for select
-  using ( bucket_id = 'attempts' AND (storage.foldername(name))[1] = auth.uid()::text );
+---
 
-create policy "Users can insert their own attempt files"
-  on storage.objects for insert
-  with check ( bucket_id = 'attempts' AND (storage.foldername(name))[1] = auth.uid()::text );
+### **Step 9: Install Dependencies**
 
-create policy "Users can update their own attempt files"
-  on storage.objects for update
-  using ( bucket_id = 'attempts' AND (storage.foldername(name))[1] = auth.uid()::text );
-
-create policy "Users can delete their own attempt files"
-  on storage.objects for delete
-  using ( bucket_id = 'attempts' AND (storage.foldername(name))[1] = auth.uid()::text );
-```
-
-**What this does:** These policies allow users to upload/read/update/delete files ONLY in their own folder (path starts with their user_id).
-
-### Step 5: Enable Email Authentication
-
-In your Supabase dashboard:
-1. Go to **Authentication** → **Providers**
-2. Make sure **Email** is enabled (it should be by default)
-
-### Step 6: Restart Your App
+Make sure all packages are installed:
 
 ```bash
-# Stop your current dev server (Ctrl+C)
-# Then restart:
-npm start
+npm install
 ```
-
-### Step 7: Sign Up & Test!
-
-1. When the app loads, you'll see the **login screen**
-2. Click "Don't have an account? Sign Up"
-3. Enter any email (e.g., `test@test.com`) and password (min 6 chars)
-4. Click **Sign Up**
-5. Then **Sign In** with those credentials
-6. You should now see the HandwritingCanvas!
 
 ---
 
-## 🧪 Testing "Next Line" Behavior
+### **Step 10: Start the App**
 
-Now test the freeze functionality:
+1. **Start the Expo dev server**:
+   ```bash
+   npm start
+   ```
 
-1. **Draw some strokes** (let's call them A and B)
-2. **Press "Next Line"**
-   - ✅ Strokes should freeze (move to committed layer)
-   - ✅ You should see: `Saved step 0 → <user_id>/<attempt_id>/0.png`
-3. **Draw more strokes** (let's call them C and D)
-4. **Press Undo twice**
-   - ✅ Should remove D, then C
-   - ❌ Should NOT remove A or B (they're frozen!)
-5. **Press "Next Line" again**
-   - ✅ Current strokes freeze
-   - ✅ Step counter increments
+2. **Run on iOS** (Mac only):
+   ```bash
+   npm run ios
+   ```
+
+3. **Or run on Android**:
+   ```bash
+   npm run android
+   ```
+
+---
+
+## ✅ Testing the OCR
+
+1. **Sign up** in the app (create an account)
+2. **Draw something** on the canvas (write a simple equation like `2 + 2 = 4`)
+3. **Click "Next Line"**
+4. **Wait ~5-10 seconds**
+5. You should see:
+   - OCR panel at the bottom showing the LaTeX
+   - Confidence score
+   - Option to edit the result
 
 ---
 
 ## 🐛 Troubleshooting
 
-### "Invalid API key" or connection errors
-- Make sure you created the `.env` file
-- Make sure you copied the correct URL and key from Supabase
-- Restart your app after creating `.env`
+### **OCR still not working?**
 
-### "Policy violation" errors
-- Make sure you ran the SQL schema (Step 3)
-- The schema includes Row Level Security policies that allow users to access their own data
+**Check the console logs:**
+```bash
+# In your terminal where Expo is running, you'll see logs
+# Look for:
+[commit] invoking OCR…
+```
 
-### Still seeing "No authenticated user"
-- Make sure you signed up and logged in
-- Check the console - you should see a session object if logged in
+**Common issues:**
 
-### Can't see PNGs in storage
-- Go to Supabase → **Storage** → **attempts** bucket
-- You should see folders like: `<user_id>/<attempt_id>/0.png`
+1. **"OPENAI_API_KEY not set"**
+   - ❌ You forgot Step 7 - add the key to Supabase secrets
+   - Run: `supabase secrets set OPENAI_API_KEY=sk-...`
 
----
+2. **"Invalid API key"**
+   - ❌ Your OpenAI key is wrong or expired
+   - Check your key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 
-## 📚 What Each Piece Does (Beginner Explanation)
+3. **"Insufficient credits"**
+   - ❌ Your OpenAI account has no credits
+   - Add credits at [platform.openai.com/settings/organization/billing](https://platform.openai.com/settings/organization/billing)
 
-### AuthScreen.tsx
-- **What**: A login/signup form
-- **Why**: Supabase needs to know who you are to save your data securely
-- **How**: Uses `supabase.auth.signInWithPassword()` to log you in
+4. **OCR times out (no response after 60 seconds)**
+   - ❌ Edge function not deployed
+   - Run: `supabase functions deploy ocr-latex`
 
-### App.tsx Changes
-- **What**: Checks if you're logged in when app starts
-- **Why**: We only show the canvas if you're authenticated
-- **How**: 
-  - `getSession()` checks current login status
-  - `onAuthStateChange()` listens for login/logout events
-  - Shows `AuthScreen` if not logged in, `HandwritingCanvas` if logged in
-
-### HandwritingCanvas.tsx Changes
-- **What**: Moved `commitStepLocal()` to run first
-- **Why**: So strokes freeze even if upload fails
-- **How**: Now executes in this order:
-  1. Freeze strokes (commitStepLocal)
-  2. Take snapshot
-  3. Upload to Supabase
-  4. If upload fails, strokes are still frozen!
-
-### attemptStore.ts Changes
-- **What**: Added console logs to undo/commit functions
-- **Why**: For debugging - shows you what's happening
-- **How**: Logs activeStrokes count, committedLayers count, etc.
+5. **"Missing Supabase credentials"**
+   - ❌ Your `.env` file is missing or wrong
+   - Check Step 3 - make sure `.env` exists and has correct values
+   - **Restart the dev server** after changing `.env`
 
 ---
 
-## ✨ Expected Behavior After Setup
+## 📚 What Each File Does
 
-1. **App opens** → Login screen appears
-2. **You sign in** → HandwritingCanvas appears
-3. **You draw** → Strokes appear in real-time
-4. **You press "Next Line"** → 
-   - Strokes freeze immediately
-   - PNG uploads to Supabase
-   - Success message appears
-   - Active layer clears for next step
-5. **You press Undo** → Only removes strokes from current active layer
-6. **Frozen strokes** → Cannot be undone (they're committed!)
+### **Client-Side (Your App)**
+- `.env` → Stores Supabase URL and anon key (client credentials)
+- `lib/supabase.ts` → Creates Supabase client for your app
+- `services/stepOCR.ts` → Calls the OCR Edge Function
+- `components/HandwritingCanvas.tsx` → Main drawing UI
+
+### **Server-Side (Supabase)**
+- `supabase/functions/ocr-latex/index.ts` → The OCR Edge Function (runs on Supabase servers)
+- `OPENAI_API_KEY` in Supabase secrets → Used by the Edge Function to call OpenAI
 
 ---
 
-Need help? Check the console logs - they'll show you what's happening at each step!
+## 🎯 Summary: Where Each Key Goes
 
+| Key | Where It Goes | Why |
+|-----|---------------|-----|
+| **Supabase URL** | `.env` file → `EXPO_PUBLIC_SUPABASE_URL` | Tells your app where your Supabase backend is |
+| **Supabase Anon Key** | `.env` file → `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Lets your app authenticate with Supabase (public, safe to use in app) |
+| **OpenAI API Key** | Supabase Dashboard → Edge Functions → Secrets | Used by server-side OCR function to call OpenAI (NEVER put in `.env`!) |
+
+---
+
+## 🔐 Security Notes
+
+1. ✅ **SAFE in `.env`**: Supabase URL and Anon Key (these are public)
+2. ❌ **NEVER in `.env`**: OpenAI API Key (this costs money - keep it server-side only!)
+3. ✅ **Gitignored**: `.env` is already in `.gitignore` - it won't be committed to Git
+
+---
+
+## 📞 Need Help?
+
+If you're still stuck:
+1. Check the **console logs** for error messages
+2. Verify each step above carefully
+3. Make sure you **restarted the dev server** after changing `.env`
+
+Good luck! 🚀

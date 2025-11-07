@@ -103,10 +103,10 @@
 
 **Story:** Convert step PNG to LaTeX on the server using GPT-4o Vision
 
-- ⬜ **Task 3.1.1:** Implement `POST /ocr-latex` accepting base64/URL with auth checks
-- ⬜ **Task 3.1.2:** Call OpenAI Vision, parse/normalize LaTeX, compute confidence
-- ⬜ **Task 3.1.3:** Enforce input size guardrails; structured error responses; basic rate limiting/backoff cues
-- ⬜ **Task 3.1.4:** Return `{ latex, confidence }` per PRD contract
+- ✅ **Task 3.1.1:** Implement `POST /ocr-latex` accepting base64/URL with auth checks
+- ✅ **Task 3.1.2:** Call OpenAI Vision, parse/normalize LaTeX, compute confidence
+- ✅ **Task 3.1.3:** Enforce input size guardrails; structured error responses; basic rate limiting/backoff cues
+- ✅ **Task 3.1.4:** Return `{ latex, confidence }` per PRD contract
 
 **Acceptance:** Given a valid PNG, function returns plausible LaTeX and confidence.
 
@@ -114,10 +114,10 @@
 
 **Story:** Display recognized LaTeX and store on the step
 
-- ⬜ **Task 3.2.1:** After step upload, call `ocr-latex`; show LaTeX inline with confidence
-- ⬜ **Task 3.2.2:** Allow optional manual LaTeX edit/override
-- ⬜ **Task 3.2.3:** Update `attempt_steps` with `ocr_latex`, `ocr_confidence`
-- ⬜ **Task 3.2.4:** Handle `uncertain` cases; prompt user to rewrite if needed
+- ✅ **Task 3.2.1:** After step upload, call `ocr-latex`; show LaTeX inline with confidence
+- ✅ **Task 3.2.2:** Allow optional manual LaTeX edit/override
+- ✅ **Task 3.2.3:** Update `attempt_steps` with `ocr_latex`, `ocr_confidence`
+- ✅ **Task 3.2.4:** Handle `uncertain` cases; prompt user to rewrite if needed
 
 **Acceptance:** Recognized LaTeX appears under the step; DB reflects OCR fields.
 
