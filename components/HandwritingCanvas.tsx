@@ -1,11 +1,14 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Text, Pressable, TextInput } from 'react-native';
 import { Canvas, Path as SkPathComponent, Skia, useCanvasRef, Group } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useAttemptCanvasStore, type Stroke, type StrokePoint } from '../stores/attemptStore';
 import { snapshotCanvasToPng } from '../services/stepExport';
 import { uploadStepPng } from '../services/stepUpload';
 import { supabase } from '../lib/supabase';
+import * as FileSystem from 'expo-file-system/legacy';
+import { invokeOcrLatex } from '../services/stepOCR';
+import Constants from 'expo-constants';
 
 const CANVAS_WIDTH = 1920;
 const CANVAS_HEIGHT = 1080;
@@ -31,7 +34,13 @@ export default function HandwritingCanvas() {
   const [busy, setBusy] = useState(false);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const [commitMsg, setCommitMsg] = useState<string | null>(null);
-  const debug = process.env.EXPO_PUBLIC_DEBUG === 'true';
+  const [lastOcr, setLastOcr] = useState<{ stepId: string; latex: string; confidence: number } | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editLatex, setEditLatex] = useState('');
+  const [showOcrPanel, setShowOcrPanel] = useState(true);
+  const [ocrError, setOcrError] = useState<string | null>(null);
+  // WHY: Get debug setting from app config (loaded from .env)
+  const debug = Constants.expoConfig?.extra?.EXPO_PUBLIC_DEBUG === 'true';
   const log = useCallback((msg: string) => {
     if (!debug) return;
     setDebugLog((prev) => {
@@ -167,6 +176,7 @@ export default function HandwritingCanvas() {
     try {
       setSnapshotOnlyActive(true);
       let bytes: Uint8Array | null = null;
+      let lastFileUri: string | null = null;
       let scale = 1;
       const MAX = 2_000_000; // 2MB target
       const t0 = Date.now();
@@ -175,6 +185,7 @@ export default function HandwritingCanvas() {
         await new Promise((r) => requestAnimationFrame(() => r(undefined)));
         const res = await snapshotCanvasToPng(canvasRef, { filename: `step-${Date.now()}.png` });
         bytes = res.bytes;
+        lastFileUri = res.fileUri;
         if (bytes.byteLength <= MAX) break;
         scale *= 0.85;
         if (scale < 0.4) break;
@@ -185,14 +196,45 @@ export default function HandwritingCanvas() {
       const { userId, attemptId } = await ensureAttemptId();
 
       const t1 = Date.now();
-      await uploadStepPng({ userId, attemptId, stepIndex: idx, bytes, vectorJson });
+      const up = await uploadStepPng({ userId, attemptId, stepIndex: idx, bytes, vectorJson });
       const uploadMs = Date.now() - t1;
       console.log('[commit] snapshotMs=', snapshotMs, 'uploadMs=', uploadMs);
       setCommitMsg(`Saved step ${idx} → ${userId}/${attemptId}/${idx}.png`);
+
+      // OCR: read base64 and invoke Edge Function
+      if (!up?.stepId) throw new Error('No stepId returned from insert');
+      if (!lastFileUri) throw new Error('No snapshot file path');
+      // Some environments may not expose EncodingType; fall back to 'base64' literal
+      const encoding: any = (FileSystem as any).EncodingType?.Base64 ?? 'base64';
+      const base64 = await FileSystem.readAsStringAsync(lastFileUri, { encoding });
+      // Run OCR in a separate try/catch so upload success isn't marked as commit failure
+      try {
+        console.log('[commit] invoking OCR…');
+        const ocr = await invokeOcrLatex({ attemptId, stepId: up.stepId, imageBase64: base64 });
+        setLastOcr({ stepId: up.stepId, latex: ocr.latex, confidence: ocr.confidence });
+        setOcrError(null);
+        setShowOcrPanel(true);
+        setEditOpen(false);
+        setEditLatex(ocr.latex);
+
+        // Persist OCR fields on row
+        const { error: updErr } = await supabase
+          .from('attempt_steps')
+          .update({ ocr_latex: ocr.latex, ocr_confidence: ocr.confidence })
+          .eq('id', up.stepId);
+        if (updErr) {
+          console.warn('Failed to persist OCR fields:', updErr);
+        }
+      } catch (ocrErr: any) {
+        console.warn('OCR failed:', ocrErr);
+        const m = typeof ocrErr?.message === 'string' ? ocrErr.message : String(ocrErr);
+        setOcrError(m);
+      }
     } catch (e: any) {
       console.warn('Commit failed:', e);
       const m = typeof e?.message === 'string' ? e.message : String(e);
       setCommitMsg(`Commit failed: ${m}`);
+      setOcrError(m);
     } finally {
       setSnapshotOnlyActive(false);
       setSnapshotScale(1);
@@ -251,7 +293,7 @@ export default function HandwritingCanvas() {
           </Group>
         </Canvas>
       </GestureDetector>
-      <View className="items-center py-2">
+      <View className="items-center py-2" style={{ paddingBottom: 80 }}>
         {commitMsg && (
           <Text style={{ color: commitMsg.startsWith('Commit failed') ? '#dc2626' : '#059669' }}>{commitMsg}</Text>
         )}
@@ -263,6 +305,155 @@ export default function HandwritingCanvas() {
           </View>
         )}
       </View>
+
+      {/* Persistent OCR section (anchored at bottom) */}
+      <View
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          backgroundColor: 'white',
+          borderTopWidth: 1,
+          borderColor: '#e5e7eb',
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          gap: 8,
+          zIndex: 200,
+          elevation: 6,
+        }}
+      >
+        <Text style={{ fontWeight: '600' }}>OCR</Text>
+        {!lastOcr && !ocrError && (
+          <Text style={{ color: '#64748b' }}>No OCR result yet. Draw a step and tap “Next line”.</Text>
+        )}
+        {ocrError && !lastOcr && (
+          <Text style={{ color: '#dc2626' }}>OCR failed: {ocrError}</Text>
+        )}
+        {lastOcr && !editOpen && (
+          <>
+            <Text selectable>LaTeX: {lastOcr.latex}</Text>
+            <Text selectable>conf: {lastOcr.confidence.toFixed(2)}</Text>
+            {lastOcr.confidence < 0.6 && (
+              <Text style={{ color: '#b45309' }}>Hard to read—try rewriting this line for better OCR.</Text>
+            )}
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+              <Pressable onPress={() => { setEditOpen(true); setEditLatex(lastOcr.latex); }} className="px-3 py-1 rounded-md" style={{ backgroundColor: '#e2e8f0' }}>
+                <Text>Edit</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
+        {lastOcr && editOpen && (
+          <>
+            <TextInput
+              value={editLatex}
+              onChangeText={setEditLatex}
+              placeholder="Edit LaTeX"
+              style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6 }}
+            />
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+              <Pressable
+                onPress={async () => {
+                  if (!lastOcr) return;
+                  const { error } = await supabase
+                    .from('attempt_steps')
+                    .update({ ocr_latex: editLatex })
+                    .eq('id', lastOcr.stepId);
+                  if (!error) {
+                    setLastOcr({ ...lastOcr, latex: editLatex });
+                    setEditOpen(false);
+                  } else {
+                    console.warn('Failed to save override:', error);
+                  }
+                }}
+                className="px-3 py-1 rounded-md"
+                style={{ backgroundColor: '#22c55e' }}
+              >
+                <Text style={{ color: 'white' }}>Save</Text>
+              </Pressable>
+              <Pressable onPress={() => setEditOpen(false)} className="px-3 py-1 rounded-md" style={{ backgroundColor: '#e2e8f0' }}>
+                <Text>Cancel</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
+      </View>
+
+      {lastOcr && showOcrPanel && (
+        <View
+          style={{
+            position: 'absolute',
+            top: 72,
+            right: 12,
+            maxWidth: '90%',
+            backgroundColor: 'white',
+            borderWidth: 1,
+            borderColor: '#e5e7eb',
+            borderRadius: 10,
+            padding: 10,
+            shadowColor: '#000',
+            shadowOpacity: 0.1,
+            shadowRadius: 6,
+            shadowOffset: { width: 0, height: 2 },
+            elevation: 3,
+            zIndex: 100,
+          }}
+        >
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={{ fontWeight: '600' }}>OCR</Text>
+            <Pressable onPress={() => setShowOcrPanel(false)} style={{ paddingHorizontal: 6, paddingVertical: 2 }}>
+              <Text style={{ color: '#64748b' }}>Hide</Text>
+            </Pressable>
+          </View>
+          {!editOpen ? (
+            <Text selectable style={{ marginTop: 4 }}>LaTeX: {lastOcr.latex}{"\n"}(conf: {lastOcr.confidence.toFixed(2)})</Text>
+          ) : (
+            <TextInput
+              value={editLatex}
+              onChangeText={setEditLatex}
+              placeholder="Edit LaTeX"
+              style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, marginTop: 6 }}
+            />
+          )}
+          {lastOcr.confidence < 0.6 && !editOpen && (
+            <Text style={{ color: '#b45309', marginTop: 6 }}>
+              Hard to read—try rewriting this line for better OCR.
+            </Text>
+          )}
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+            {!editOpen ? (
+              <Pressable onPress={() => { setEditOpen(true); setEditLatex(lastOcr.latex); }} className="px-3 py-1 rounded-md" style={{ backgroundColor: '#e2e8f0' }}>
+                <Text>Edit</Text>
+              </Pressable>
+            ) : (
+              <>
+                <Pressable
+                  onPress={async () => {
+                    const { error } = await supabase
+                      .from('attempt_steps')
+                      .update({ ocr_latex: editLatex })
+                      .eq('id', lastOcr.stepId);
+                    if (!error) {
+                      setLastOcr({ ...lastOcr, latex: editLatex });
+                      setEditOpen(false);
+                    } else {
+                      console.warn('Failed to save override:', error);
+                    }
+                  }}
+                  className="px-3 py-1 rounded-md"
+                  style={{ backgroundColor: '#22c55e' }}
+                >
+                  <Text style={{ color: 'white' }}>Save</Text>
+                </Pressable>
+                <Pressable onPress={() => setEditOpen(false)} className="px-3 py-1 rounded-md" style={{ backgroundColor: '#e2e8f0' }}>
+                  <Text>Cancel</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
+        </View>
+      )}
     </View>
   );
 }

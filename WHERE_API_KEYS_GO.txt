@@ -1,0 +1,110 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    🔑 WHERE DO THE API KEYS GO?                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 📱 CLIENT-SIDE (Your App)                                                   │
+│                                                                              │
+│ FILE: .env (in your project root)                                           │
+│                                                                              │
+│ EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co                   │
+│ EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...        │
+│ EXPO_PUBLIC_APP_ENV=dev                                                     │
+│ EXPO_PUBLIC_DEBUG=true                                                      │
+│                                                                              │
+│ ✅ SAFE - These are public keys                                             │
+│ 📍 Location: /Users/yibin/Documents/.../MathMuse/.env                       │
+│                                                                              │
+│ HOW TO GET:                                                                 │
+│   1. Go to supabase.com                                                     │
+│   2. Open your project                                                      │
+│   3. Settings ⚙️  → API                                                     │
+│   4. Copy "Project URL" and "anon public" key                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🖥️  SERVER-SIDE (Supabase Edge Functions)                                   │
+│                                                                              │
+│ LOCATION: Supabase Dashboard → Edge Functions → Secrets                     │
+│                                                                              │
+│ Secret Name:   OPENAI_API_KEY                                               │
+│ Secret Value:  sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            │
+│                                                                              │
+│ ⚠️  NEVER PUT IN .env - Costs money!                                        │
+│ 🔒 Stays on server only                                                     │
+│                                                                              │
+│ HOW TO SET:                                                                 │
+│   Option A (Dashboard):                                                     │
+│     1. Supabase dashboard → Edge Functions → Settings/Manage secrets        │
+│     2. Add secret: Name = OPENAI_API_KEY, Value = sk-proj-...               │
+│                                                                              │
+│   Option B (CLI):                                                           │
+│     supabase secrets set OPENAI_API_KEY=sk-proj-your-key-here               │
+│                                                                              │
+│ HOW TO GET OPENAI KEY:                                                      │
+│   1. Go to platform.openai.com/api-keys                                     │
+│   2. Click "Create new secret key"                                          │
+│   3. Copy the key (starts with sk-proj-)                                    │
+│   4. Add credits ($5-10) at platform.openai.com/.../billing                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                              🎯 SUMMARY TABLE                                ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║ API Key                  │ Where It Goes                │ Get It From        ║
+║─────────────────────────────────────────────────────────────────────────────║
+║ Supabase URL             │ .env file                    │ supabase.com       ║
+║ Supabase Anon Key        │ .env file                    │ supabase.com       ║
+║ OpenAI API Key           │ Supabase Edge Functions      │ platform.openai.com║
+║                          │ (Secrets, NOT .env!)         │                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                           📋 QUICK SETUP STEPS                               ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Step 1: Create .env file
+  ▶ cp .env.example .env
+  ▶ Edit .env and add your Supabase URL and anon key
+
+Step 2: Set OpenAI key in Supabase
+  ▶ Get key from platform.openai.com/api-keys
+  ▶ Add to Supabase Edge Functions → Secrets
+  ▶ Name: OPENAI_API_KEY, Value: sk-proj-...
+
+Step 3: Deploy Edge Function
+  ▶ supabase login
+  ▶ supabase link --project-ref your-project-id
+  ▶ supabase functions deploy ocr-latex
+
+Step 4: Install & Run
+  ▶ npm install
+  ▶ npm start
+  ▶ npm run ios (or npm run android)
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                          ⚠️  COMMON MISTAKES                                 ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+❌ Putting OpenAI key in .env file
+   ✅ Put it in Supabase Edge Functions secrets instead
+
+❌ Forgetting to add OpenAI credits
+   ✅ Go to platform.openai.com → Billing → Add $5-10
+
+❌ Not deploying the Edge Function
+   ✅ Run: supabase functions deploy ocr-latex
+
+❌ Not restarting dev server after creating .env
+   ✅ Stop (Ctrl+C) and run: npm start
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                          📚 MORE HELP                                        ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+See these files for detailed guides:
+  • OCR_FIX_SUMMARY.md    - What I fixed and what you need to do
+  • SETUP_GUIDE.md        - Complete step-by-step setup guide
+  • API_KEYS_GUIDE.md     - Detailed API key reference
+  • .env.example          - Template for your .env file
+

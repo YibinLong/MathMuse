@@ -21,25 +21,25 @@ export async function uploadStepPng({ userId, attemptId, stepIndex, bytes, vecto
     if (i > 0) await delay(tries[i]);
     const { error: upErr } = await supabase.storage
       .from('attempts')
-      .upload(path, ab, { contentType: 'image/png', upsert: false });
+      .upload(path, ab, { contentType: 'image/png', upsert: true });
     if (upErr) {
       lastError = upErr;
       continue;
     }
 
-    const { error: insErr } = await supabase.from('attempt_steps').insert({
+    const { data: ins, error: insErr } = await supabase.from('attempt_steps').insert({
       attempt_id: attemptId,
       step_index: stepIndex,
       png_storage_path: path,
       vector_json: vectorJson,
-    });
+    }).select('id').single();
     if (insErr) {
       lastError = insErr;
       // Best-effort: attempt row insert failed but file uploaded; keep retrying insert
       continue;
     }
 
-    return { path };
+    return { path, stepId: ins?.id as string };
   }
 
   throw lastError ?? new Error('Upload failed');
