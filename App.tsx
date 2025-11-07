@@ -1,11 +1,11 @@
 import { StatusBar } from 'expo-status-bar';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, Pressable, Alert } from 'react-native';
 import HandwritingCanvas from './components/HandwritingCanvas';
 import AuthScreen from './screens/AuthScreen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { supabase } from './lib/supabase';
 import { useEffect, useState } from 'react';
-import { Session } from '@supabase/supabase-js';
+import { useSessionStore } from './stores/sessionStore';
 
 /**
  * Main App Component
@@ -19,27 +19,42 @@ import { Session } from '@supabase/supabase-js';
  * 4. Listen for auth changes (login/logout) and update UI accordingly
  */
 export default function App() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Select each piece individually to avoid returning a new object each render
+  const session = useSessionStore((s) => s.session);
+  const initialized = useSessionStore((s) => s.initialized);
+  const setSession = useSessionStore((s) => s.setSession);
+  const signOutFn = useSessionStore((s) => s.signOut);
+  const initializeFn = useSessionStore((s) => s.initialize);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
-    // Check current auth session on app start
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
+    // Run once on mount
+    initializeFn().catch((err) => {
+      console.warn('Failed to initialize session:', err);
     });
 
-    // Listen for auth changes (login, logout, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
     });
 
-    // Cleanup listener on unmount
-    return () => subscription.unsubscribe();
-  }, []);
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []); // intentionally empty
+
+  async function handleSignOut() {
+    try {
+      setSigningOut(true);
+      await signOutFn();
+    } catch (error: any) {
+      Alert.alert('Sign out failed', error?.message ?? 'Please try again.');
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   // Show loading spinner while checking auth
-  if (loading) {
+  if (!initialized) {
     return (
       <View className="flex-1 bg-white items-center justify-center">
         <ActivityIndicator size="large" color="#2563eb" />
@@ -53,8 +68,23 @@ export default function App() {
       {session ? (
         // User is logged in → Show main app
         <View className="flex-1 bg-white">
-          <View className="items-center py-2">
-            <Text className="text-blue-500 text-lg font-semibold">MathMuse</Text>
+          <View className="flex-row items-center justify-between px-4 py-2">
+            <View>
+              <Text className="text-blue-500 text-lg font-semibold">MathMuse</Text>
+              {session?.user?.email && (
+                <Text className="text-gray-500 text-xs">{session.user.email}</Text>
+              )}
+            </View>
+            <Pressable
+              onPress={handleSignOut}
+              disabled={signingOut}
+              className="px-3 py-1 rounded-md"
+              style={{ backgroundColor: signingOut ? '#cbd5f5' : '#e2e8f0' }}
+            >
+              <Text style={{ color: '#1f2937', fontWeight: '600' }}>
+                {signingOut ? 'Signing out…' : 'Sign out'}
+              </Text>
+            </Pressable>
           </View>
           <HandwritingCanvas />
           <StatusBar style="auto" />
