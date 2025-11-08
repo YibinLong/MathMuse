@@ -18,6 +18,81 @@ function normalizeLatex(s: string | undefined | null): string {
     .trim();
 }
 
+function latexToPlainExpr(latex: string): string {
+  // Very small normalizer for simple algebra: remove spaces, convert \cdot and similar to '*'
+  return (latex || '')
+    .replace(/\\cdot/g, '*')
+    .replace(/\\times/g, '*')
+    .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)')
+    .replace(/\\left|\\right/g, '')
+    .replace(/\s+/g, '')
+    // Make implicit multiplication explicit for simple patterns
+    .replace(/(\d)(x)/gi, '$1*$2')   // 2x -> 2*x
+    .replace(/(x)(\d)/gi, '$1*$2')   // x2 -> x*2
+    .replace(/(\d)\(/g, '$1*(')      // 2( ... ) -> 2*( ... )
+    .replace(/\)(\d|x)/gi, ')*$1')   // (...)2 -> (...)*2, (...)x -> (...)*x
+    .replace(/(x)\(/gi, '$1*(');     // x( ... ) -> x*( ... )
+}
+
+function isSafeExpr(expr: string): boolean {
+  // Allow only digits, decimal point, operators, parentheses, and the variable x
+  return /^[0-9x+\-*/().^=]*$/.test(expr);
+}
+
+function evalExpr(expr: string): number {
+  // Replace '^' with '**' for JS exponent
+  const js = expr.replace(/\^/g, '**');
+  // eslint-disable-next-line no-new-func
+  const fn = new Function(`return (${js});`);
+  const v = fn();
+  if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error('bad_eval');
+  return v;
+}
+
+function satisfiesEquation(problemLatex: string, currLatex: string): boolean {
+  // Handle simple one-variable equations like ax=b and current like x=2 or x=4/2 or x=\frac{4}{2}
+  // Accept a numeric expression on the RHS and evaluate it.
+  const curr = latexToPlainExpr(currLatex);
+  const m = curr.match(/^x=(.+)$/i);
+  if (!m) return false;
+  const rhsExpr = m[1].trim();
+  if (!isSafeExpr(rhsExpr.replace(/x/gi, ''))) return false;
+  let xVal: number;
+  try {
+    xVal = evalExpr(rhsExpr);
+  } catch {
+    return false;
+  }
+
+  const prob = latexToPlainExpr(problemLatex);
+  const parts = prob.split('=');
+  if (parts.length !== 2) return false;
+  const [lhs, rhs] = parts;
+  if (!isSafeExpr(lhs) || !isSafeExpr(rhs)) return false;
+
+  const sub = (s: string) => s.replace(/x/gi, `(${xVal})`);
+  try {
+    const lv = evalExpr(sub(lhs));
+    const rv = evalExpr(sub(rhs));
+    return Math.abs(lv - rv) < 1e-9;
+  } catch {
+    return false;
+  }
+}
+
+function parseNumericX(currLatex: string): number | null {
+  const curr = latexToPlainExpr(currLatex);
+  const m = curr.match(/^x=(.+)$/i);
+  if (!m) return null;
+  const rhsExpr = m[1].trim();
+  if (!isSafeExpr(rhsExpr.replace(/x/gi, ''))) return null;
+  try {
+    return evalExpr(rhsExpr);
+  } catch {
+    return null;
+  }
+}
+
 async function callCameraMathShowSteps(args: { problem: string }) {
   const apiKey = Deno.env.get('CAMERAMATH_API_KEY');
   if (!apiKey) throw Object.assign(new Error('CAMERAMATH_API_KEY not set'), { status: 500 });
@@ -90,6 +165,29 @@ export async function handle(req: Request): Promise<Response> {
       return jsonResponse(body, 400);
     }
 
+    // Short-circuit for numeric solutions: if the current step directly satisfies the equation, treat as correct_useful.
+    // If it is a numeric solution that does NOT satisfy, return incorrect with a clear reason.
+    try {
+      const numeric = parseNumericX(currLatex);
+      if (numeric !== null && satisfiesEquation(problem, currLatex)) {
+        const body: SolveSuccess = {
+          status: 'correct_useful',
+          reason: 'This step satisfies the original equation.',
+          solverMetadata: { engine: 'direct_check' }
+        };
+        return jsonResponse(body, 200);
+      } else if (numeric !== null) {
+        const body: SolveSuccess = {
+          status: 'incorrect',
+          reason: `The solution x=${numeric} does not satisfy the equation.`,
+          solverMetadata: { engine: 'direct_check' }
+        };
+        return jsonResponse(body, 200);
+      }
+    } catch {
+      // ignore and continue
+    }
+
     // Try CameraMath (show-steps) first with small retry on 429/5xx
     let cmErr: any = null;
     const backoff = [0, 500, 1000];
@@ -104,6 +202,8 @@ export async function handle(req: Request): Promise<Response> {
 
         const currN = normalizeLatex(currLatex);
         const prevN = normalizeLatex(prevLatex);
+        const probN = normalizeLatex(problem);
+        const prevIsProblem = !!prevN && prevN === probN;
         const currIdx = steps.findIndex((s) => s === currN);
         const prevIdx = prevN ? steps.findIndex((s) => s === prevN) : -1;
 
@@ -125,7 +225,9 @@ export async function handle(req: Request): Promise<Response> {
           reason = `Matches solver step ${currIdx + 1}.`;
         } else if (currIdx < 0 && prevIdx >= 0) {
           status = 'uncertain';
-          reason = 'Previous step matched solver path, current did not.';
+          reason = prevIsProblem
+            ? 'First step after the problem; this line did not match the solver path.'
+            : 'Previous step matched solver path, current did not.';
         }
 
         const body: SolveSuccess = { status, reason, solverMetadata: { engine: 'cameramath', stepsMatched: { currIdx, prevIdx }, raw: cm } };

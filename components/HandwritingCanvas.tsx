@@ -8,11 +8,16 @@ import { uploadStepPng } from '../services/stepUpload';
 import { supabase } from '../lib/supabase';
 import * as FileSystem from 'expo-file-system/legacy';
 import { invokeOcrLatex } from '../services/stepOCR';
-import { invokeSolveStep, type ValidationResult } from '../services/stepValidate';
+import { invokeSolveStep, type ValidationResult, type ValidationStatus } from '../services/stepValidate';
+import { computeHint, type HintResult } from '../services/hints';
+import { requestHintSpeech, type TtsResponse, fetchHintSpeechUrl } from '../services/hintVoice';
+import { Audio } from 'expo-av';
 import Constants from 'expo-constants';
 
 const CANVAS_WIDTH = 1920;
 const CANVAS_HEIGHT = 1080;
+const HINT_LEVEL_LABELS = ['', 'Nudge', 'Directional hint', 'Micro-step'];
+type AttemptMeta = { attemptId: string; userId: string };
 
 function splitMultiLineLatex(input: string): string {
   const raw = (input ?? '').replace(/\r\n|\r|\n/g, '\\\\');
@@ -36,6 +41,7 @@ const WIDTHS = [4, 6, 8, 10, 14];
 export default function HandwritingCanvas() {
   const canvasRef = useCanvasRef();
   const strokeIdRef = useRef<string | null>(null);
+  const hintSoundRef = useRef<Audio.Sound | null>(null);
   const [snapshotOnlyActive, setSnapshotOnlyActive] = useState(false);
   const [snapshotScale, setSnapshotScale] = useState(1);
   const [busy, setBusy] = useState(false);
@@ -47,7 +53,193 @@ export default function HandwritingCanvas() {
   const [showOcrPanel, setShowOcrPanel] = useState(true);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [lastValidation, setLastValidation] = useState<ValidationResult | null>(null);
+  const [attemptMeta, setAttemptMeta] = useState<AttemptMeta | null>(null);
+  const [lastHint, setLastHint] = useState<HintResult | null>(null);
+  const [hintAudio, setHintAudio] = useState<TtsResponse | null>(null);
+  const [isPlayingHint, setIsPlayingHint] = useState(false);
+  const [ttsError, setTtsError] = useState<string | null>(null);
+  const [consecutiveNonProgress, setConsecutiveNonProgress] = useState(0);
   const [lastWasProblemSet, setLastWasProblemSet] = useState(false);
+  useEffect(() => {
+    Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false }).catch((err) => {
+      console.warn('Audio mode setup failed:', err);
+    });
+    return () => {
+      if (hintSoundRef.current) {
+        hintSoundRef.current.unloadAsync().catch(() => undefined);
+        hintSoundRef.current = null;
+      }
+    };
+  }, []);
+
+  const stopHintAudio = useCallback(async () => {
+    if (!hintSoundRef.current) return;
+    try {
+      await hintSoundRef.current.stopAsync();
+    } catch {
+      // ignore
+    }
+    await hintSoundRef.current.unloadAsync().catch(() => undefined);
+    hintSoundRef.current = null;
+    setIsPlayingHint(false);
+  }, []);
+
+  const playHintAudio = useCallback(async () => {
+    if (!hintAudio) return;
+    try {
+      setIsPlayingHint(true);
+      setTtsError(null);
+      if (hintSoundRef.current) {
+        await hintSoundRef.current.stopAsync().catch(() => undefined);
+        await hintSoundRef.current.unloadAsync().catch(() => undefined);
+        hintSoundRef.current = null;
+      }
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: hintAudio.audioUrl },
+        { shouldPlay: true }
+      );
+      hintSoundRef.current = sound;
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (!status || !('isLoaded' in status) || !status.isLoaded) return;
+        if (status.didJustFinish || !status.isPlaying) {
+          setIsPlayingHint(false);
+          sound.unloadAsync().catch(() => undefined);
+          if (hintSoundRef.current === sound) {
+            hintSoundRef.current = null;
+          }
+        }
+      });
+      await sound.playAsync();
+    } catch (err) {
+      console.warn('Hint audio playback failed:', err);
+      setIsPlayingHint(false);
+      setTtsError('Unable to play audio right now');
+      if (hintSoundRef.current) {
+        hintSoundRef.current.unloadAsync().catch(() => undefined);
+        hintSoundRef.current = null;
+      }
+    }
+  }, [hintAudio]);
+
+  const hydrateAttemptFromServer = useCallback(async (meta: AttemptMeta) => {
+    const { attemptId } = meta;
+    try {
+      const { data: steps, error } = await supabase
+        .from('attempt_steps')
+        .select('id, step_index, vector_json, ocr_latex, ocr_confidence, validation_status, validation_reason, solver_metadata, hint_level, hint_text, tts_audio_path')
+        .eq('attempt_id', attemptId)
+        .order('step_index', { ascending: true });
+      if (error) throw error;
+
+      const layers = (steps ?? []).map((step) => (Array.isArray(step.vector_json) ? step.vector_json : []) as Stroke[]);
+      const lastStep = steps && steps.length > 0 ? steps[steps.length - 1] : null;
+      const nextIndex = lastStep ? (typeof lastStep.step_index === 'number' ? lastStep.step_index + 1 : steps!.length) : 0;
+      hydrateFromRemote(layers, nextIndex);
+
+      if (!lastStep) {
+        await stopHintAudio();
+        setLastOcr(null);
+        setOcrError(null);
+        setEditOpen(false);
+        setEditLatex('');
+        setShowOcrPanel(false);
+        setLastValidation(null);
+        setLastHint(null);
+        setHintAudio(null);
+        setTtsError(null);
+        setConsecutiveNonProgress(0);
+        setLastWasProblemSet(false);
+        if (layers.length === 0) {
+          setCommitMsg('Ready for a fresh attempt.');
+        }
+        return;
+      }
+
+      const confidenceValue = typeof lastStep.ocr_confidence === 'number'
+        ? lastStep.ocr_confidence
+        : typeof lastStep.ocr_confidence === 'string'
+          ? Number(lastStep.ocr_confidence)
+          : 1;
+      if (lastStep.ocr_latex) {
+        setLastOcr({ stepId: lastStep.id, latex: lastStep.ocr_latex, confidence: Number.isFinite(confidenceValue) ? confidenceValue : 1 });
+        setShowOcrPanel(true);
+        setEditLatex(lastStep.ocr_latex);
+      } else {
+        setLastOcr(null);
+        setShowOcrPanel(false);
+        setEditLatex('');
+      }
+      setOcrError(null);
+      setEditOpen(false);
+
+      if (lastStep.validation_status && lastStep.validation_reason) {
+        const validation: ValidationResult = {
+          status: lastStep.validation_status as ValidationStatus,
+          reason: lastStep.validation_reason,
+          solverMetadata: lastStep.solver_metadata ?? undefined,
+        };
+        setLastValidation(validation);
+        setLastWasProblemSet(false);
+      } else {
+        setLastValidation(null);
+        setLastWasProblemSet(lastStep.step_index === 0);
+      }
+
+      let consecutive = 0;
+      if (steps && steps.length > 0) {
+        for (let i = steps.length - 1; i >= 0; i--) {
+          const status = steps[i]?.validation_status as ValidationStatus | null | undefined;
+          if (!status || status === 'correct_useful') break;
+          if (status === 'correct_not_useful' || status === 'incorrect' || status === 'uncertain') {
+            consecutive += 1;
+          } else {
+            break;
+          }
+        }
+      }
+      setConsecutiveNonProgress(consecutive);
+
+      if (lastStep.hint_level && lastStep.hint_level > 0 && lastStep.hint_text) {
+        setLastHint({
+          level: lastStep.hint_level,
+          text: lastStep.hint_text,
+          status: (lastStep.validation_status as ValidationStatus) ?? 'uncertain',
+        });
+      } else {
+        setLastHint(null);
+      }
+
+      await stopHintAudio();
+      if (lastStep.tts_audio_path && lastStep.hint_level && lastStep.hint_level >= 2) {
+        try {
+          const audio = await fetchHintSpeechUrl(lastStep.tts_audio_path);
+          setHintAudio(audio);
+          setTtsError(null);
+        } catch (audioErr: any) {
+          console.warn('Failed to load hint audio:', audioErr);
+          setHintAudio(null);
+          setTtsError(typeof audioErr?.message === 'string' ? audioErr.message : 'Failed to load audio');
+        }
+      } else {
+        setHintAudio(null);
+        setTtsError(null);
+      }
+      setCommitMsg(`Resumed attempt with ${steps?.length ?? 0} saved step${(steps?.length ?? 0) === 1 ? '' : 's'}.`);
+    } catch (err) {
+      console.warn('Failed to hydrate attempt:', err);
+    }
+  }, [hydrateFromRemote, stopHintAudio]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const meta = await ensureAttemptId();
+        await hydrateAttemptFromServer(meta);
+      } catch (err) {
+        console.warn('Initial attempt load failed:', err);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrateAttemptFromServer]);
   // WHY: Get debug setting from app config (loaded from .env)
   const debug = Constants.expoConfig?.extra?.EXPO_PUBLIC_DEBUG === 'true';
   const log = useCallback((msg: string) => {
@@ -75,6 +267,7 @@ export default function HandwritingCanvas() {
     undo,
     commitStepLocal,
     clearAll,
+    hydrateFromRemote,
   } = useAttemptCanvasStore();
 
   const ensureStrokeStart = useCallback(() => {
@@ -150,40 +343,28 @@ export default function HandwritingCanvas() {
     />
   );
 
-  async function ensureAttemptId(): Promise<{ userId: string; attemptId: string }> {
+  async function ensureAttemptId(): Promise<AttemptMeta> {
+    if (attemptMeta) {
+      return attemptMeta;
+    }
+
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData.user?.id;
     if (!userId) throw new Error('No authenticated user');
 
     const { data: existing, error: qErr } = await supabase
       .from('attempts')
-      .select('id, problem_id')
+      .select('id')
       .eq('user_id', userId)
       .eq('status', 'in_progress')
+      .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
     if (qErr) throw qErr;
     if (existing?.id) {
-      // If we're at a fresh local session (no local steps) but the server attempt
-      // already has a problem or remote steps, complete it and start a new attempt.
-      if (committedLayers.length === 0 && activeStrokes.length === 0) {
-        // Count remote steps for this attempt
-        const { count, error: cErr } = await supabase
-          .from('attempt_steps')
-          .select('id', { count: 'exact', head: true })
-          .eq('attempt_id', existing.id);
-        const hasRemoteSteps = !cErr && typeof count === 'number' ? count > 0 : false;
-        if (existing.problem_id || hasRemoteSteps) {
-          // Complete the old attempt to avoid mixing sessions/indices
-          await supabase.from('attempts').update({ status: 'completed' }).eq('id', existing.id);
-        } else {
-          // No problem and no remote steps — safe to reuse
-          return { userId, attemptId: existing.id };
-        }
-      } else {
-        // We already have local progress; reuse current attempt
-        return { userId, attemptId: existing.id };
-      }
+      const meta: AttemptMeta = { userId, attemptId: existing.id };
+      setAttemptMeta(meta);
+      return meta;
     }
 
     const { data: ins, error: iErr } = await supabase
@@ -192,7 +373,9 @@ export default function HandwritingCanvas() {
       .select('id')
       .single();
     if (iErr) throw iErr;
-    return { userId, attemptId: ins.id };
+    const meta: AttemptMeta = { userId, attemptId: ins.id };
+    setAttemptMeta(meta);
+    return meta;
   }
 
   // On mount: if canvas is empty and there is a lingering attempt with a problem but no steps,
@@ -244,6 +427,13 @@ export default function HandwritingCanvas() {
     
     try {
       setSnapshotOnlyActive(true);
+      // Ensure the canvas re-renders without prior committed layers before snapshotting.
+      // Skia can schedule draws slightly later; proactively request redraws and wait two frames.
+      await new Promise((r) => setTimeout(r, 30));
+      canvasRef.current?.redraw?.();
+      await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+      canvasRef.current?.redraw?.();
+      await new Promise((r) => requestAnimationFrame(() => r(undefined)));
       let bytes: Uint8Array | null = null;
       let lastFileUri: string | null = null;
       let scale = 1;
@@ -378,12 +568,82 @@ export default function HandwritingCanvas() {
             if (idx === 0) {
               // First line: treat as problem capture only; do NOT validate
               setLastValidation(null);
+              setLastHint(null);
               setLastWasProblemSet(true);
+              setConsecutiveNonProgress(0);
+              await stopHintAudio();
+              setHintAudio(null);
+              setTtsError(null);
               setCommitMsg('Equation captured as the problem.');
             } else {
+              // Capture previous line's validation status before we validate the new line
+              const prevStatus = lastValidation?.status;
               const validation = await invokeSolveStep({ prevLatex, currLatex: processedCurr, problem: problemText });
               setLastWasProblemSet(false);
               setLastValidation(validation);
+              let nextConsecutive = consecutiveNonProgress;
+              let hintPayload: HintResult | null = null;
+              if (validation.status === 'correct_useful') {
+                nextConsecutive = 0;
+                hintPayload = null;
+                // If the last line was non-progress but this one is correct, encourage and clarify
+                if (prevStatus && (prevStatus === 'incorrect' || prevStatus === 'uncertain' || prevStatus === 'correct_not_useful')) {
+                  setCommitMsg('Correct — nice fix. The previous line was off; you can delete it or just continue.');
+                } else {
+                  setCommitMsg('Correct — keep going!');
+                }
+              } else if (validation.status === 'correct_not_useful' || validation.status === 'incorrect' || validation.status === 'uncertain') {
+                nextConsecutive = consecutiveNonProgress + 1;
+                hintPayload = computeHint({
+                  status: validation.status,
+                  consecutiveNonProgress: nextConsecutive,
+                });
+                // For non-progress, keep message concise; detailed text comes from hintPayload
+                if (validation.status === 'correct_not_useful') {
+                  setCommitMsg('Right idea — try a step that moves you forward.');
+                } else if (validation.status === 'incorrect') {
+                  setCommitMsg('Something changed incorrectly — check this line against the one above.');
+                } else {
+                  setCommitMsg('Hard to judge — rewrite a bit more clearly and try again.');
+                }
+              }
+              setConsecutiveNonProgress(nextConsecutive);
+              setLastHint(hintPayload);
+
+              let ttsInfo: TtsResponse | null = null;
+              if (hintPayload && hintPayload.level >= 2) {
+                await stopHintAudio();
+                // Run TTS generation in the background so UI can finish saving immediately.
+                (async () => {
+                  try {
+                    const ctl = { cancelled: false };
+                    const promise = requestHintSpeech({
+                      attemptId,
+                      stepId: up.stepId,
+                      text: hintPayload.text,
+                      voice: 'alloy',
+                    });
+                    const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('tts_timeout')), 10000));
+                    const result = await Promise.race([promise, timeout]) as TtsResponse;
+                    if (!ctl.cancelled) {
+                      setHintAudio(result);
+                      setTtsError(null);
+                      // Persist audio path best-effort
+                      await supabase.from('attempt_steps')
+                        .update({ tts_audio_path: result.storagePath })
+                        .eq('id', up.stepId);
+                    }
+                  } catch (ttsEx: any) {
+                    console.warn('TTS generation failed:', ttsEx);
+                    setHintAudio(null);
+                    setTtsError(typeof ttsEx?.message === 'string' ? ttsEx.message : 'Failed to generate audio');
+                  }
+                })();
+              } else {
+                await stopHintAudio();
+                setHintAudio(null);
+                setTtsError(null);
+              }
 
               // Persist validation fields
               const { error: valErr } = await supabase
@@ -392,9 +652,18 @@ export default function HandwritingCanvas() {
                   validation_status: validation.status,
                   validation_reason: validation.reason,
                   solver_metadata: validation.solverMetadata ?? null,
+                  hint_level: hintPayload ? hintPayload.level : 0,
+                  hint_text: hintPayload ? hintPayload.text : null,
+                  // tts_audio_path may be filled in by the background TTS task
                 })
                 .eq('id', up.stepId);
               if (valErr) console.warn('Failed to persist validation fields:', valErr);
+
+              const { error: attemptStampErr } = await supabase
+                .from('attempts')
+                .update({ updated_at: new Date().toISOString() })
+                .eq('id', attemptId);
+              if (attemptStampErr) console.warn('Failed to bump attempt timestamp:', attemptStampErr);
             }
           }
         } catch (valEx) {
@@ -415,7 +684,7 @@ export default function HandwritingCanvas() {
       setSnapshotScale(1);
       setBusy(false);
     }
-  }, [activeStrokes.length, busy, canvasRef, commitStepLocal]);
+  }, [activeStrokes.length, busy, canvasRef, commitStepLocal, consecutiveNonProgress, stopHintAudio]);
 
   return (
     <View className="flex-1 bg-white">
@@ -450,9 +719,14 @@ export default function HandwritingCanvas() {
               try {
                 // Clear local canvas and UI state
                 clearAll();
+                await stopHintAudio();
                 setLastOcr(null);
                 setLastValidation(null);
-                setCommitMsg(null);
+                setLastHint(null);
+                setHintAudio(null);
+                setTtsError(null);
+                setConsecutiveNonProgress(0);
+                setCommitMsg('Attempt cleared. Start a new attempt.');
                 setShowOcrPanel(false);
                 setEditOpen(false);
                 setEditLatex('');
@@ -473,6 +747,7 @@ export default function HandwritingCanvas() {
                       .from('attempts')
                       .update({ status: 'completed', problem_id: null })
                       .eq('id', att.id);
+                    setAttemptMeta(null);
                   }
                 }
               } catch (e) {
@@ -655,15 +930,34 @@ export default function HandwritingCanvas() {
                       {lastWasProblemSet ? 'problem set' : lastValidation!.status.replaceAll('_', ' ')}
                     </Text>
                   </View>
-                  {!lastWasProblemSet && <Text style={{ color: '#475569', marginTop: 4 }}>{lastValidation!.reason}</Text>}
-                  {!lastWasProblemSet && lastValidation!.status === 'correct_not_useful' && (
-                    <Text style={{ color: '#b45309', marginTop: 4 }}>Nudge: This is correct but doesn’t move the solution forward.</Text>
-                  )}
-                  {!lastWasProblemSet && lastValidation!.status === 'incorrect' && (
-                    <Text style={{ color: '#b45309', marginTop: 4 }}>Hint: Re-check your transformation—try isolating the variable step-by-step.</Text>
-                  )}
-                  {!lastWasProblemSet && lastValidation!.status === 'uncertain' && (
-                    <Text style={{ color: '#b45309', marginTop: 4 }}>Unclear step—rewrite this line more clearly.</Text>
+                  {!lastWasProblemSet && (
+                    <>
+                      <Text style={{ color: '#475569', marginTop: 4 }}>{lastValidation!.reason}</Text>
+                      {lastHint && (
+                        <View style={{ marginTop: 6 }}>
+                          <Text style={{ fontWeight: '600', color: '#0f172a' }}>
+                            Hint (Level {lastHint.level} – {HINT_LEVEL_LABELS[lastHint.level] ?? 'Guidance'})
+                          </Text>
+                          <Text style={{ color: '#1f2937', marginTop: 4 }}>{lastHint.text}</Text>
+                          {hintAudio && (
+                            <Pressable
+                              onPress={isPlayingHint ? stopHintAudio : playHintAudio}
+                              className="px-3 py-1 rounded-md"
+                              style={{ backgroundColor: '#dbeafe', marginTop: 8 }}
+                            >
+                              <Text style={{ color: '#1d4ed8', fontWeight: '600' }}>
+                                {isPlayingHint ? 'Stop voice hint' : 'Play voice hint'}
+                              </Text>
+                            </Pressable>
+                          )}
+                          {ttsError && (
+                            <Text style={{ color: '#dc2626', marginTop: 6 }}>
+                              Audio unavailable: {ttsError}
+                            </Text>
+                          )}
+                        </View>
+                      )}
+                    </>
                   )}
                   {lastWasProblemSet && (
                     <Text style={{ color: '#475569', marginTop: 4 }}>Equation captured as the problem.</Text>
