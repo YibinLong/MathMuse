@@ -18,7 +18,12 @@ export async function requestHintSpeech({ attemptId, stepId, text, voice }: TtsA
     body: { attemptId, stepId, text, voice },
   });
   if (error) {
-    throw error;
+    const status = (error as any)?.status;
+    const message = (error as any)?.message ?? '';
+    if (status === 500 && typeof message === 'string' && message.includes('OPENAI_API_KEY')) {
+      throw new Error('Hint audio unavailable: set OPENAI_API_KEY in Supabase secrets and redeploy tts-speak.');
+    }
+    throw new Error(typeof message === 'string' && message.length > 0 ? message : 'TTS request failed');
   }
   if (!data || typeof data.audioUrl !== 'string' || typeof data.storagePath !== 'string') {
     throw new Error('Invalid TTS response');
@@ -34,7 +39,12 @@ export async function fetchHintSpeechUrl(storagePath: string): Promise<TtsRespon
     body: { storagePath },
   });
   if (error) {
-    throw error;
+    const status = (error as any)?.status;
+    const message = (error as any)?.message ?? '';
+    if (status === 500 && typeof message === 'string' && message.includes('OPENAI_API_KEY')) {
+      throw new Error('Hint audio unavailable: set OPENAI_API_KEY in Supabase secrets and redeploy tts-speak.');
+    }
+    throw new Error(typeof message === 'string' && message.length > 0 ? message : 'TTS request failed');
   }
   if (!data || typeof data.audioUrl !== 'string' || typeof data.storagePath !== 'string') {
     throw new Error('Invalid TTS response');
