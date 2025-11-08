@@ -199,43 +199,44 @@
 
 ## PHASE 7: UX, LOGGING, TESTING, DEPLOYMENT
 
-### Epic 7.1: Problem Viewer & Session UI
+### Epic 7.1: Design System & Theming (gluestack-ui + gradients)
 
-**Story:** Show the problem at top and step list below
+**Story:** Establish a modern, startup-like look using gluestack-ui and NativeWind
 
-- ⬜ **Task 7.1.1:** Problem header with title/body
-- ⬜ **Task 7.1.2:** Step list UI showing LaTeX, status, and actions (play, rewrite)
-- ⬜ **Task 7.1.3:** Controls for pen, eraser, color, undo, Next line
+- ⬜ **Task 7.1.1:** Add gluestack-ui deps to project; verify Expo SDK 54 compatibility
+- ⬜ **Task 7.1.2:** Define color palette, typography scale, spacing, radius tokens
+- ⬜ **Task 7.1.3:** Set up gradient primitives (Expo LinearGradient) and usage guidelines
 
-**Acceptance:** The core training screen aligns with PRD layout and flows.
+**Acceptance:** Theme tokens compile; sample Button/Text render with gradients available.
 
-### Epic 7.2: Debugging & Logging
+### Epic 7.2: App Shell & Screen Polish
 
-**Story:** Simple logger and network visibility for solo-dev
+**Story:** Apply the design system across the main screens
 
-- ⬜ **Task 7.2.1:** Implement logger gated by `EXPO_PUBLIC_DEBUG`
-- ⬜ **Task 7.2.2:** Tag logs across OCR → validation → hint flows
-- ⬜ **Task 7.2.3:** Mirror critical errors to in-app toasts
+- ⬜ **Task 7.2.1:** App shell: safe areas, gradient header/background, spacing rhythm
+- ⬜ **Task 7.2.2:** Problem header/card styling (title, body, metadata)
+- ⬜ **Task 7.2.3:** Step list polish: status chips, actions (play, rewrite), empty states
 
-**Acceptance:** Developer can trace flows and see surfaced errors in-app.
+**Acceptance:** Main screen looks cohesive, modern, and accessible.
 
-### Epic 7.3: Testing
+### Epic 7.3: Motion & Feedback
 
-**Story:** Unit tests for stores/utils; optional function tests
+**Story:** Add delightful feedback without hurting performance
 
-- ⬜ **Task 7.3.1:** Configure Jest; add tests for Zustand stores and pure utils
-- ⬜ **Task 7.3.2:** Add mock tests for `ocr-latex` and `solve-step` (local stubs or CLI)
+- ⬜ **Task 7.3.1:** Toasts/snackbars and non-blocking error surfacing
+- ⬜ **Task 7.3.2:** Loading states: skeletons/spinners for OCR/validation waits
+- ⬜ **Task 7.3.3:** Micro-interactions: button presses, subtle screen transitions
 
-**Acceptance:** Core logic has test coverage; CI can run tests locally.
+**Acceptance:** App feels responsive and polished; no noticeable jank on devices.
 
-### Epic 7.4: Build, Profiles, and Releases
+### Epic 7.4: Debugging, Testing, and Builds
 
-**Story:** Validate environments and prepare for EAS builds
+**Story:** Ensure observability, correctness, and ship-ready builds
 
-- ⬜ **Task 7.4.1:** Validate `EXPO_PUBLIC_APP_ENV` (dev|staging|prod) config
-- ⬜ **Task 7.4.2:** Document secrets placement (client vs Edge Functions)
-- ⬜ **Task 7.4.3:** Configure EAS project; produce a dev client build for iOS/Android
-- ⬜ **Task 7.4.4:** Prepare release build checklist and smoke tests
+- ⬜ **Task 7.4.1:** Implement logger gated by `EXPO_PUBLIC_DEBUG`; tag OCR→validation→hints
+- ⬜ **Task 7.4.2:** Configure Jest; add tests for Zustand stores and pure utils
+- ⬜ **Task 7.4.3:** Validate `EXPO_PUBLIC_APP_ENV` (dev|staging|prod) config; secrets doc
+- ⬜ **Task 7.4.4:** Configure EAS project; produce dev client builds and release checklist
 
 **Acceptance:** Signed dev client builds exist; release checklist defined.
 
