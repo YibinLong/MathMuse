@@ -427,6 +427,13 @@ export default function HandwritingCanvas() {
     
     try {
       setSnapshotOnlyActive(true);
+      // Ensure the canvas re-renders without prior committed layers before snapshotting.
+      // Skia can schedule draws slightly later; proactively request redraws and wait two frames.
+      await new Promise((r) => setTimeout(r, 30));
+      canvasRef.current?.redraw?.();
+      await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+      canvasRef.current?.redraw?.();
+      await new Promise((r) => requestAnimationFrame(() => r(undefined)));
       let bytes: Uint8Array | null = null;
       let lastFileUri: string | null = null;
       let scale = 1;
@@ -569,6 +576,8 @@ export default function HandwritingCanvas() {
               setTtsError(null);
               setCommitMsg('Equation captured as the problem.');
             } else {
+              // Capture previous line's validation status before we validate the new line
+              const prevStatus = lastValidation?.status;
               const validation = await invokeSolveStep({ prevLatex, currLatex: processedCurr, problem: problemText });
               setLastWasProblemSet(false);
               setLastValidation(validation);
@@ -577,12 +586,26 @@ export default function HandwritingCanvas() {
               if (validation.status === 'correct_useful') {
                 nextConsecutive = 0;
                 hintPayload = null;
+                // If the last line was non-progress but this one is correct, encourage and clarify
+                if (prevStatus && (prevStatus === 'incorrect' || prevStatus === 'uncertain' || prevStatus === 'correct_not_useful')) {
+                  setCommitMsg('Correct — nice fix. The previous line was off; you can delete it or just continue.');
+                } else {
+                  setCommitMsg('Correct — keep going!');
+                }
               } else if (validation.status === 'correct_not_useful' || validation.status === 'incorrect' || validation.status === 'uncertain') {
                 nextConsecutive = consecutiveNonProgress + 1;
                 hintPayload = computeHint({
                   status: validation.status,
                   consecutiveNonProgress: nextConsecutive,
                 });
+                // For non-progress, keep message concise; detailed text comes from hintPayload
+                if (validation.status === 'correct_not_useful') {
+                  setCommitMsg('Right idea — try a step that moves you forward.');
+                } else if (validation.status === 'incorrect') {
+                  setCommitMsg('Something changed incorrectly — check this line against the one above.');
+                } else {
+                  setCommitMsg('Hard to judge — rewrite a bit more clearly and try again.');
+                }
               }
               setConsecutiveNonProgress(nextConsecutive);
               setLastHint(hintPayload);
@@ -590,20 +613,32 @@ export default function HandwritingCanvas() {
               let ttsInfo: TtsResponse | null = null;
               if (hintPayload && hintPayload.level >= 2) {
                 await stopHintAudio();
-                try {
-                  ttsInfo = await requestHintSpeech({
-                    attemptId,
-                    stepId: up.stepId,
-                    text: hintPayload.text,
-                    voice: 'alloy',
-                  });
-                  setHintAudio(ttsInfo);
-                  setTtsError(null);
-                } catch (ttsEx: any) {
-                  console.warn('TTS generation failed:', ttsEx);
-                  setHintAudio(null);
-                  setTtsError(typeof ttsEx?.message === 'string' ? ttsEx.message : 'Failed to generate audio');
-                }
+                // Run TTS generation in the background so UI can finish saving immediately.
+                (async () => {
+                  try {
+                    const ctl = { cancelled: false };
+                    const promise = requestHintSpeech({
+                      attemptId,
+                      stepId: up.stepId,
+                      text: hintPayload.text,
+                      voice: 'alloy',
+                    });
+                    const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('tts_timeout')), 10000));
+                    const result = await Promise.race([promise, timeout]) as TtsResponse;
+                    if (!ctl.cancelled) {
+                      setHintAudio(result);
+                      setTtsError(null);
+                      // Persist audio path best-effort
+                      await supabase.from('attempt_steps')
+                        .update({ tts_audio_path: result.storagePath })
+                        .eq('id', up.stepId);
+                    }
+                  } catch (ttsEx: any) {
+                    console.warn('TTS generation failed:', ttsEx);
+                    setHintAudio(null);
+                    setTtsError(typeof ttsEx?.message === 'string' ? ttsEx.message : 'Failed to generate audio');
+                  }
+                })();
               } else {
                 await stopHintAudio();
                 setHintAudio(null);
@@ -619,7 +654,7 @@ export default function HandwritingCanvas() {
                   solver_metadata: validation.solverMetadata ?? null,
                   hint_level: hintPayload ? hintPayload.level : 0,
                   hint_text: hintPayload ? hintPayload.text : null,
-                  tts_audio_path: ttsInfo ? ttsInfo.storagePath : null,
+                  // tts_audio_path may be filled in by the background TTS task
                 })
                 .eq('id', up.stepId);
               if (valErr) console.warn('Failed to persist validation fields:', valErr);
