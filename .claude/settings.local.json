@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(env:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(npm search:*)",
+      "Bash(npm install:*)",
+      "Bash(npx @upstash/context7-mcp:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
