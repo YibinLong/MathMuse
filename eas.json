@@ -1,0 +1,32 @@
+{
+  "cli": {
+    "version": ">= 13.2.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease -PreactNativeArchitectures=arm64-v8a -x lint -x lintVitalAnalyzeRelease -x lintVitalReportRelease -x test -x check"
+      },
+      "env": {
+        "EAS_BUILD_DISABLE_BUNDLE_JAVASCRIPT_STEP": "1",
+        "EXPO_PUBLIC_NEW_ARCH_ENABLED": "false",
+        "EXPO_PUBLIC_SKIP_BUNDLE_GENERATION": "1"
+      }
+    }
+  }
+}
+

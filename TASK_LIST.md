@@ -199,13 +199,13 @@
 
 ## PHASE 7: UX, LOGGING, TESTING, DEPLOYMENT
 
-### Epic 7.1: Design System & Theming (gluestack-ui + gradients)
+### Epic 7.1: Design System & Theming (NativeWind)
 
-**Story:** Establish a modern, startup-like look using gluestack-ui and NativeWind
+**Story:** Establish a modern, startup-like look using NativeWind and custom styling
 
-- ⬜ **Task 7.1.1:** Add gluestack-ui deps to project; verify Expo SDK 54 compatibility
-- ⬜ **Task 7.1.2:** Define color palette, typography scale, spacing, radius tokens
-- ⬜ **Task 7.1.3:** Set up gradient primitives (Expo LinearGradient) and usage guidelines
+- ⬜ **Task 7.1.1:** Define color palette, typography scale, spacing, radius tokens
+- ⬜ **Task 7.1.2:** Create reusable UI components with consistent styling
+- ⬜ **Task 7.1.3:** Implement theme system for dark/light mode support
 
 **Acceptance:** Theme tokens compile; sample Button/Text render with gradients available.
 
