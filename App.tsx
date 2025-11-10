@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { supabase } from './lib/supabase';
 import { useEffect, useState } from 'react';
 import { useSessionStore } from './stores/sessionStore';
+import { Button } from './components/ui/Button';
 
 /**
  * Main App Component
@@ -67,24 +68,48 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       {session ? (
         // User is logged in → Show main app
-        <View className="flex-1 bg-white">
-          <View className="flex-row items-center justify-between px-4 py-2">
-            <View>
-              <Text className="text-blue-500 text-lg font-semibold">MathMuse</Text>
-              {session?.user?.email && (
-                <Text className="text-gray-500 text-xs">{session.user.email}</Text>
-              )}
+        <View style={{ flex: 1, backgroundColor: 'white', paddingTop: 40 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              borderBottomWidth: 1,
+              borderColor: '#e5e7eb',
+              backgroundColor: 'white',
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 12,
+                  backgroundColor: '#4f46e5',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginRight: 10,
+                }}
+              >
+                <Text style={{ color: 'white', fontWeight: '800', fontSize: 18 }}>μ</Text>
+              </View>
+              <View>
+                <Text style={{ color: '#111827', fontSize: 18, fontWeight: '800' }}>MathMuse</Text>
+                {session?.user?.email && (
+                  <Text style={{ color: '#6b7280', fontSize: 12 }}>{session.user.email}</Text>
+                )}
+              </View>
             </View>
-            <Pressable
-              onPress={handleSignOut}
+            <Button
+              title={signingOut ? 'Signing out…' : 'Sign out'}
+              variant="outline"
+              size="md"
               disabled={signingOut}
-              className="px-3 py-1 rounded-md"
-              style={{ backgroundColor: signingOut ? '#cbd5f5' : '#e2e8f0' }}
-            >
-              <Text style={{ color: '#1f2937', fontWeight: '600' }}>
-                {signingOut ? 'Signing out…' : 'Sign out'}
-              </Text>
-            </Pressable>
+              onPress={handleSignOut}
+              style={{ borderRadius: 12 }}
+            />
           </View>
           <HandwritingCanvas />
           <StatusBar style="auto" />

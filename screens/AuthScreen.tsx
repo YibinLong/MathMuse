@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Pressable, Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { Card } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
 
 /**
  * Simple authentication screen for email/password login
@@ -60,63 +62,58 @@ export default function AuthScreen({ onAuthSuccess }: { onAuthSuccess: () => voi
   }
 
   return (
-    <View className="flex-1 bg-white justify-center px-8">
-      {/* App Title */}
-      <Text className="text-3xl font-bold text-center mb-8 text-blue-600">
-        MathMuse
-      </Text>
-      <Text className="text-center mb-6 text-gray-600">
-        {isSignUp ? 'Create an account' : 'Sign in to continue'}
-      </Text>
-
-      {/* Email Input */}
-      <View className="mb-4">
-        <Text className="mb-2 text-gray-700">Email</Text>
-        <TextInput
-          className="border border-gray-300 rounded-lg px-4 py-3"
-          placeholder="your@email.com"
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          editable={!loading}
-        />
+    <View className="flex-1" style={{ backgroundColor: '#f8fafc', paddingHorizontal: 20, justifyContent: 'center' }}>
+      <View style={{ alignItems: 'center', marginBottom: 16 }}>
+        <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#4f46e5', alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: 'white', fontWeight: '800', fontSize: 22 }}>μ</Text>
+        </View>
+        <Text style={{ marginTop: 10, fontSize: 24, fontWeight: '800', color: '#111827' }}>MathMuse</Text>
+        <Text style={{ marginTop: 6, color: '#6b7280' }}>{isSignUp ? 'Create an account' : 'Sign in to continue'}</Text>
       </View>
 
-      {/* Password Input */}
-      <View className="mb-6">
-        <Text className="mb-2 text-gray-700">Password</Text>
-        <TextInput
-          className="border border-gray-300 rounded-lg px-4 py-3"
-          placeholder="••••••••"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          editable={!loading}
+      <Card style={{ borderRadius: 18, padding: 16 }}>
+        <View style={{ marginBottom: 12 }}>
+          <Text style={{ marginBottom: 6, color: '#334155', fontWeight: '600' }}>Email</Text>
+          <TextInput
+            placeholder="your@email.com"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            editable={!loading}
+            style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, backgroundColor: 'white' }}
+          />
+        </View>
+
+        <View style={{ marginBottom: 16 }}>
+          <Text style={{ marginBottom: 6, color: '#334155', fontWeight: '600' }}>Password</Text>
+          <TextInput
+            placeholder="••••••••"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            editable={!loading}
+            style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, backgroundColor: 'white' }}
+          />
+        </View>
+
+        <Button
+          title={loading ? 'Loading…' : isSignUp ? 'Sign Up' : 'Sign In'}
+          onPress={handleAuth}
+          disabled={loading}
+          size="lg"
+          style={{ borderRadius: 12 }}
         />
-      </View>
 
-      {/* Submit Button */}
-      <Pressable
-        className={`rounded-lg py-4 mb-4 ${loading ? 'bg-gray-400' : 'bg-blue-600'}`}
-        onPress={handleAuth}
-        disabled={loading}
-      >
-        <Text className="text-white text-center font-semibold text-lg">
-          {loading ? 'Loading...' : isSignUp ? 'Sign Up' : 'Sign In'}
-        </Text>
-      </Pressable>
+        <Pressable onPress={() => setIsSignUp(!isSignUp)} disabled={loading} style={{ marginTop: 12 }}>
+          <Text style={{ textAlign: 'center', color: '#4f46e5', fontWeight: '600' }}>
+            {isSignUp ? 'Already have an account? Sign In' : "Don’t have an account? Sign Up"}
+          </Text>
+        </Pressable>
+      </Card>
 
-      {/* Toggle between Sign In / Sign Up */}
-      <Pressable onPress={() => setIsSignUp(!isSignUp)} disabled={loading}>
-        <Text className="text-center text-blue-600">
-          {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
-        </Text>
-      </Pressable>
-
-      {/* Dev Helper Text */}
-      <View className="mt-8 p-4 bg-yellow-50 rounded-lg">
-        <Text className="text-sm text-gray-600 text-center">
+      <View style={{ marginTop: 12, padding: 12, backgroundColor: '#fffbeb', borderRadius: 12 }}>
+        <Text style={{ fontSize: 12, color: '#374151', textAlign: 'center' }}>
           💡 For testing: Use any email and password (min 6 chars)
         </Text>
       </View>

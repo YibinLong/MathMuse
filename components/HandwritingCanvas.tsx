@@ -13,6 +13,8 @@ import { computeHint, type HintResult } from '../services/hints';
 import { requestHintSpeech, type TtsResponse, fetchHintSpeechUrl } from '../services/hintVoice';
 import { Audio } from 'expo-av';
 import Constants from 'expo-constants';
+import { Card } from './ui/Card';
+import { Button } from './ui/Button';
 
 const CANVAS_WIDTH = 1920;
 const CANVAS_HEIGHT = 1080;
@@ -688,85 +690,72 @@ export default function HandwritingCanvas() {
 
   return (
     <View className="flex-1 bg-white">
-      <View className="px-4 py-2 flex-row items-center justify-between">
-        <View className="flex-row items-center gap-2">
-          {COLORS.map((c) => (
-            <Pressable key={c} onPress={() => setColor(c)}
-              className="rounded-full"
-              style={{ width: 28, height: 28, backgroundColor: c, borderWidth: c === color ? 2 : 0, borderColor: '#111' }}
-            />
-          ))}
-        </View>
-        <View className="flex-row items-center gap-2">
-          {WIDTHS.map((w) => (
-            <Pressable key={w} onPress={() => setStrokeWidth(w)}
-              className="items-center justify-center"
-              style={{ width: 32, height: 32, borderWidth: w === strokeWidth ? 2 : 1, borderColor: '#cbd5e1', borderRadius: 16 }}
-            >
-              <View style={{ width: w, height: w, backgroundColor: '#0f172a', borderRadius: w / 2 }} />
-            </Pressable>
-          ))}
-        </View>
-        <View className="flex-row items-center gap-3">
-          <Pressable onPress={() => setToolMode(mode === 'pen' ? 'eraser' : 'pen')} className="px-3 py-1 rounded-md" style={{ backgroundColor: mode === 'eraser' ? '#fde68a' : '#e2e8f0' }}>
-            <Text>{mode === 'eraser' ? 'Eraser' : 'Pen'}</Text>
-          </Pressable>
-          <Pressable onPress={undo} className="px-3 py-1 rounded-md" style={{ backgroundColor: '#e2e8f0' }}>
-            <Text>Undo</Text>
-          </Pressable>
-          <Pressable
-            onPress={async () => {
-              try {
-                // Clear local canvas and UI state
-                clearAll();
-                await stopHintAudio();
-                setLastOcr(null);
-                setLastValidation(null);
-                setLastHint(null);
-                setHintAudio(null);
-                setTtsError(null);
-                setConsecutiveNonProgress(0);
-                setCommitMsg('Attempt cleared. Start a new attempt.');
-                setShowOcrPanel(false);
-                setEditOpen(false);
-                setEditLatex('');
-                // Complete current attempt and unset problem so next commit starts fresh
-                const { data: userData } = await supabase.auth.getUser();
-                const userId = userData.user?.id;
-                if (userId) {
-                  const { data: att, error: attErr } = await supabase
-                    .from('attempts')
-                    .select('id')
-                    .eq('user_id', userId)
-                    .eq('status', 'in_progress')
-                    .limit(1)
-                    .maybeSingle();
-                  if (!attErr && att?.id) {
-                    // Mark as completed and remove any linked problem
-                    await supabase
-                      .from('attempts')
-                      .update({ status: 'completed', problem_id: null })
-                      .eq('id', att.id);
-                    setAttemptMeta(null);
+      <View className="px-4 pt-3">
+        <Card style={{ padding: 10, borderRadius: 18 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Pressable onPress={() => setToolMode(mode === 'pen' ? 'eraser' : 'pen')} style={{ backgroundColor: mode === 'eraser' ? '#fde68a' : '#e2e8f0', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, marginRight: 8 }}>
+                <Text style={{ fontWeight: '600' }}>{mode === 'eraser' ? 'Eraser' : 'Pen'}</Text>
+              </Pressable>
+              <Button title="Undo" variant="outline" onPress={undo} style={{ marginRight: 8 }} />
+              <Button
+                title="Clear"
+                variant="outline"
+                style={{ marginRight: 0 }}
+                onPress={async () => {
+                  try {
+                    clearAll();
+                    await stopHintAudio();
+                    setLastOcr(null);
+                    setLastValidation(null);
+                    setLastHint(null);
+                    setHintAudio(null);
+                    setTtsError(null);
+                    setConsecutiveNonProgress(0);
+                    setCommitMsg('Attempt cleared. Start a new attempt.');
+                    setShowOcrPanel(false);
+                    setEditOpen(false);
+                    setEditLatex('');
+                    const { data: userData } = await supabase.auth.getUser();
+                    const userId = userData.user?.id;
+                    if (userId) {
+                      const { data: att, error: attErr } = await supabase
+                        .from('attempts')
+                        .select('id')
+                        .eq('user_id', userId)
+                        .eq('status', 'in_progress')
+                        .limit(1)
+                        .maybeSingle();
+                      if (!attErr && att?.id) {
+                        await supabase
+                          .from('attempts')
+                          .update({ status: 'completed', problem_id: null })
+                          .eq('id', att.id);
+                        setAttemptMeta(null);
+                      }
+                    }
+                  } catch (e) {
+                    console.warn('Clear failed:', e);
                   }
-                }
-              } catch (e) {
-                console.warn('Clear failed:', e);
-              }
-            }}
-            className="px-3 py-1 rounded-md"
-            style={{ backgroundColor: '#e2e8f0' }}
-          >
-            <Text>Clear</Text>
-          </Pressable>
-          <Pressable disabled={busy || activeStrokes.length === 0} onPress={onCommit} className="px-3 py-1 rounded-md" style={{ backgroundColor: busy || activeStrokes.length === 0 ? '#94a3b8' : '#22c55e' }}>
-            <Text style={{ color: 'white' }}>{busy ? 'Saving…' : 'Next line'}</Text>
-          </Pressable>
-          <View className="px-2 py-1 rounded-md" style={{ backgroundColor: '#e2e8f0' }}>
-            <Text>Step: {stepIndex}</Text>
+                }}
+              />
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View className="px-3 py-2 rounded-lg" style={{ backgroundColor: '#f1f5f9' }}>
+                <Text style={{ fontWeight: '600', color: '#334155' }}>Step: {stepIndex}</Text>
+              </View>
+              <Button
+                title={busy || activeStrokes.length === 0 ? (busy ? 'Saving…' : 'Next line') : 'Next line'}
+                disabled={busy || activeStrokes.length === 0}
+                variant="primary"
+                size="md"
+                onPress={onCommit}
+                style={{ borderRadius: 12, backgroundColor: busy || activeStrokes.length === 0 ? '#94a3b8' : '#4f46e5', marginLeft: 8 }}
+              />
+            </View>
           </View>
           {(lastWasProblemSet || lastValidation) && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
               <View style={{
                 width: 10,
                 height: 10,
@@ -777,10 +766,41 @@ export default function HandwritingCanvas() {
                      lastValidation!.status === 'correct_not_useful' ? '#f59e0b' :
                      lastValidation!.status === 'incorrect' ? '#dc2626' : '#6b7280')
               }} />
-              <Text>{lastWasProblemSet ? 'problem set' : lastValidation!.status.replaceAll('_', ' ')}</Text>
+              <Text style={{ color: '#334155' }}>{lastWasProblemSet ? 'problem set' : lastValidation!.status.replaceAll('_', ' ')}</Text>
             </View>
           )}
-        </View>
+        </Card>
+        <View style={{ height: 8 }} />
+        <Card style={{ padding: 10, borderRadius: 18 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {COLORS.map((c) => (
+                <Pressable
+                  key={c}
+                  onPress={() => setColor(c)}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 16,
+                    backgroundColor: c,
+                    borderWidth: c === color ? 2 : 0,
+                    borderColor: '#111',
+                    marginRight: 8,
+                  }}
+                />
+              ))}
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {WIDTHS.map((w) => (
+                <Pressable key={w} onPress={() => setStrokeWidth(w)}
+                  style={{ width: 36, height: 36, borderWidth: w === strokeWidth ? 2 : 1, borderColor: '#cbd5e1', borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginLeft: 8 }}
+                >
+                  <View style={{ width: w, height: w, backgroundColor: '#0f172a', borderRadius: w / 2 }} />
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </Card>
       </View>
 
       <GestureDetector gesture={panGesture}>
@@ -820,14 +840,14 @@ export default function HandwritingCanvas() {
           backgroundColor: 'white',
           borderTopWidth: 1,
           borderColor: '#e5e7eb',
-          paddingHorizontal: 12,
-          paddingVertical: 10,
-          gap: 8,
+          paddingHorizontal: 14,
+          paddingVertical: 12,
+          gap: 10,
           zIndex: 200,
           elevation: 6,
         }}
       >
-        <Text style={{ fontWeight: '600' }}>OCR</Text>
+        <Text style={{ fontWeight: '700', color: '#0f172a' }}>OCR</Text>
         {!lastOcr && !ocrError && (
           <Text style={{ color: '#64748b' }}>No OCR result yet. Draw a step and tap “Next line”.</Text>
         )}
@@ -836,15 +856,13 @@ export default function HandwritingCanvas() {
         )}
         {lastOcr && !editOpen && (
           <>
-            <Text selectable>LaTeX: {lastOcr.latex}</Text>
-            <Text selectable>conf: {lastOcr.confidence.toFixed(2)}</Text>
+            <Text selectable style={{ color: '#111827' }}>LaTeX: {lastOcr.latex}</Text>
+            <Text selectable style={{ color: '#334155' }}>conf: {lastOcr.confidence.toFixed(2)}</Text>
             {lastOcr.confidence < 0.6 && (
               <Text style={{ color: '#b45309' }}>Hard to read—try rewriting this line for better OCR.</Text>
             )}
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
-              <Pressable onPress={() => { setEditOpen(true); setEditLatex(lastOcr.latex); }} className="px-3 py-1 rounded-md" style={{ backgroundColor: '#e2e8f0' }}>
-                <Text>Edit</Text>
-              </Pressable>
+              <Button title="Edit" variant="outline" onPress={() => { setEditOpen(true); setEditLatex(lastOcr.latex); }} />
             </View>
           </>
         )}
@@ -857,7 +875,8 @@ export default function HandwritingCanvas() {
               style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6 }}
             />
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
-              <Pressable
+              <Button
+                title="Save"
                 onPress={async () => {
                   if (!lastOcr) return;
                   const { error } = await supabase
@@ -871,14 +890,10 @@ export default function HandwritingCanvas() {
                     console.warn('Failed to save override:', error);
                   }
                 }}
-                className="px-3 py-1 rounded-md"
-                style={{ backgroundColor: '#22c55e' }}
-              >
-                <Text style={{ color: 'white' }}>Save</Text>
-              </Pressable>
-              <Pressable onPress={() => setEditOpen(false)} className="px-3 py-1 rounded-md" style={{ backgroundColor: '#e2e8f0' }}>
-                <Text>Cancel</Text>
-              </Pressable>
+                style={{ backgroundColor: '#16a34a' }}
+                textStyle={{ color: 'white' }}
+              />
+              <Button title="Cancel" variant="outline" onPress={() => setEditOpen(false)} />
             </View>
           </>
         )}
@@ -888,31 +903,29 @@ export default function HandwritingCanvas() {
         <View
           style={{
             position: 'absolute',
-            top: 72,
+            top: 76,
             right: 12,
             maxWidth: '90%',
             backgroundColor: 'white',
             borderWidth: 1,
             borderColor: '#e5e7eb',
-            borderRadius: 10,
-            padding: 10,
+            borderRadius: 14,
+            padding: 12,
             shadowColor: '#000',
             shadowOpacity: 0.1,
-            shadowRadius: 6,
+            shadowRadius: 10,
             shadowOffset: { width: 0, height: 2 },
             elevation: 3,
             zIndex: 100,
           }}
         >
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ fontWeight: '600' }}>OCR</Text>
-            <Pressable onPress={() => setShowOcrPanel(false)} style={{ paddingHorizontal: 6, paddingVertical: 2 }}>
-              <Text style={{ color: '#64748b' }}>Hide</Text>
-            </Pressable>
+            <Text style={{ fontWeight: '700', color: '#0f172a' }}>OCR</Text>
+            <Button title="Hide" variant="ghost" onPress={() => setShowOcrPanel(false)} />
           </View>
           {!editOpen ? (
             <>
-              <Text selectable style={{ marginTop: 4 }}>LaTeX: {lastOcr.latex}{"\n"}(conf: {lastOcr.confidence.toFixed(2)})</Text>
+              <Text selectable style={{ marginTop: 4, color: '#111827' }}>LaTeX: {lastOcr.latex}{"\n"}(conf: {lastOcr.confidence.toFixed(2)})</Text>
               {(lastWasProblemSet || lastValidation) && (
                 <View style={{ marginTop: 8 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -926,29 +939,27 @@ export default function HandwritingCanvas() {
                            lastValidation!.status === 'correct_not_useful' ? '#f59e0b' :
                            lastValidation!.status === 'incorrect' ? '#dc2626' : '#6b7280')
                     }} />
-                    <Text>
+                    <Text style={{ color: '#334155' }}>
                       {lastWasProblemSet ? 'problem set' : lastValidation!.status.replaceAll('_', ' ')}
                     </Text>
                   </View>
                   {!lastWasProblemSet && (
                     <>
-                      <Text style={{ color: '#475569', marginTop: 4 }}>{lastValidation!.reason}</Text>
+                      <Text style={{ color: '#475569', marginTop: 6 }}>{lastValidation!.reason}</Text>
                       {lastHint && (
                         <View style={{ marginTop: 6 }}>
-                          <Text style={{ fontWeight: '600', color: '#0f172a' }}>
+                          <Text style={{ fontWeight: '700', color: '#0f172a' }}>
                             Hint (Level {lastHint.level} – {HINT_LEVEL_LABELS[lastHint.level] ?? 'Guidance'})
                           </Text>
                           <Text style={{ color: '#1f2937', marginTop: 4 }}>{lastHint.text}</Text>
                           {hintAudio && (
-                            <Pressable
+                            <Button
+                              title={isPlayingHint ? 'Stop voice hint' : 'Play voice hint'}
+                              variant="outline"
                               onPress={isPlayingHint ? stopHintAudio : playHintAudio}
-                              className="px-3 py-1 rounded-md"
-                              style={{ backgroundColor: '#dbeafe', marginTop: 8 }}
-                            >
-                              <Text style={{ color: '#1d4ed8', fontWeight: '600' }}>
-                                {isPlayingHint ? 'Stop voice hint' : 'Play voice hint'}
-                              </Text>
-                            </Pressable>
+                              style={{ backgroundColor: '#dbeafe', borderColor: '#bfdbfe', marginTop: 8 }}
+                              textStyle={{ color: '#1d4ed8', fontWeight: '700' as any }}
+                            />
                           )}
                           {ttsError && (
                             <Text style={{ color: '#dc2626', marginTop: 6 }}>
@@ -980,12 +991,11 @@ export default function HandwritingCanvas() {
           )}
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
             {!editOpen ? (
-              <Pressable onPress={() => { setEditOpen(true); setEditLatex(lastOcr.latex); }} className="px-3 py-1 rounded-md" style={{ backgroundColor: '#e2e8f0' }}>
-                <Text>Edit</Text>
-              </Pressable>
+              <Button title="Edit" variant="outline" onPress={() => { setEditOpen(true); setEditLatex(lastOcr.latex); }} />
             ) : (
               <>
-                <Pressable
+                <Button
+                  title="Save"
                   onPress={async () => {
                     const { error } = await supabase
                       .from('attempt_steps')
@@ -998,14 +1008,10 @@ export default function HandwritingCanvas() {
                       console.warn('Failed to save override:', error);
                     }
                   }}
-                  className="px-3 py-1 rounded-md"
-                  style={{ backgroundColor: '#22c55e' }}
-                >
-                  <Text style={{ color: 'white' }}>Save</Text>
-                </Pressable>
-                <Pressable onPress={() => setEditOpen(false)} className="px-3 py-1 rounded-md" style={{ backgroundColor: '#e2e8f0' }}>
-                  <Text>Cancel</Text>
-                </Pressable>
+                  style={{ backgroundColor: '#16a34a' }}
+                  textStyle={{ color: 'white' }}
+                />
+                <Button title="Cancel" variant="outline" onPress={() => setEditOpen(false)} />
               </>
             )}
           </View>
