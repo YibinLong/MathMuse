@@ -23,7 +23,7 @@
       },
       "env": {
         "EAS_BUILD_DISABLE_BUNDLE_JAVASCRIPT_STEP": "1",
-        "EXPO_PUBLIC_NEW_ARCH_ENABLED": "false",
+        "EXPO_PUBLIC_NEW_ARCH_ENABLED": "true",
         "EXPO_PUBLIC_SKIP_BUNDLE_GENERATION": "1"
       }
     }

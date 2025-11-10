@@ -5,7 +5,12 @@
       "mcp__ide__getDiagnostics",
       "Bash(npm search:*)",
       "Bash(npm install:*)",
-      "Bash(npx @upstash/context7-mcp:*)"
+      "Bash(npx @upstash/context7-mcp:*)",
+      "WebSearch",
+      "mcp__web-search-prime__webSearchPrime",
+      "Bash(npx expo start --help:*)",
+      "Bash(eas build --help:*)",
+      "Bash(eas build:*)"
     ],
     "deny": [],
     "ask": []
