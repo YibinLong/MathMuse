@@ -24,6 +24,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     EXPO_PUBLIC_SUPABASE_ANON_KEY: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
     EXPO_PUBLIC_APP_ENV: process.env.EXPO_PUBLIC_APP_ENV || 'dev',
     EXPO_PUBLIC_DEBUG: process.env.EXPO_PUBLIC_DEBUG || 'true',
+    EXPO_PUBLIC_VOICE_HINTS_ENABLED: process.env.EXPO_PUBLIC_VOICE_HINTS_ENABLED || 'false',
     eas: {
       projectId: '5cca49f2-0145-4198-b355-efb946163882',
     },

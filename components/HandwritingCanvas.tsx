@@ -212,7 +212,7 @@ export default function HandwritingCanvas() {
       }
 
       await stopHintAudio();
-      if (lastStep.tts_audio_path && lastStep.hint_level && lastStep.hint_level >= 2) {
+      if (/* feature flag */ (Constants.expoConfig?.extra?.EXPO_PUBLIC_VOICE_HINTS_ENABLED === 'true') && lastStep.tts_audio_path && lastStep.hint_level && lastStep.hint_level >= 2) {
         try {
           const audio = await fetchHintSpeechUrl(lastStep.tts_audio_path);
           setHintAudio(audio);
@@ -244,6 +244,7 @@ export default function HandwritingCanvas() {
   }, [hydrateAttemptFromServer]);
   // WHY: Get debug setting from app config (loaded from .env)
   const debug = Constants.expoConfig?.extra?.EXPO_PUBLIC_DEBUG === 'true';
+  const voiceHintsEnabled = Constants.expoConfig?.extra?.EXPO_PUBLIC_VOICE_HINTS_ENABLED === 'true';
   const log = useCallback((msg: string) => {
     if (!debug) return;
     setDebugLog((prev) => {
@@ -613,7 +614,7 @@ export default function HandwritingCanvas() {
               setLastHint(hintPayload);
 
               let ttsInfo: TtsResponse | null = null;
-              if (hintPayload && hintPayload.level >= 2) {
+              if (voiceHintsEnabled && hintPayload && hintPayload.level >= 2) {
                 await stopHintAudio();
                 // Run TTS generation in the background so UI can finish saving immediately.
                 (async () => {
@@ -952,7 +953,7 @@ export default function HandwritingCanvas() {
                             Hint (Level {lastHint.level} – {HINT_LEVEL_LABELS[lastHint.level] ?? 'Guidance'})
                           </Text>
                           <Text style={{ color: '#1f2937', marginTop: 4 }}>{lastHint.text}</Text>
-                          {hintAudio && (
+                          {voiceHintsEnabled && hintAudio && (
                             <Button
                               title={isPlayingHint ? 'Stop voice hint' : 'Play voice hint'}
                               variant="outline"
@@ -961,7 +962,7 @@ export default function HandwritingCanvas() {
                               textStyle={{ color: '#1d4ed8', fontWeight: '700' as any }}
                             />
                           )}
-                          {ttsError && (
+                          {voiceHintsEnabled && ttsError && (
                             <Text style={{ color: '#dc2626', marginTop: 6 }}>
                               Audio unavailable: {ttsError}
                             </Text>
