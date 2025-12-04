@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Modal, Dimensions } from 'react-native';
+import { View, Text, Pressable, ScrollView, Dimensions } from 'react-native';
 import { Canvas, Path as SkPathComponent, Skia, useCanvasRef, Group } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useAttemptCanvasStore, type Stroke, type StrokePoint } from '../stores/attemptStore';
@@ -17,9 +17,10 @@ import { Ionicons } from '@expo/vector-icons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CANVAS_WIDTH = SCREEN_WIDTH;
-const LINE_HEIGHT = 65;
-const INITIAL_LINES = 6;
+const LINE_HEIGHT = 80;
+const INITIAL_LINES = 2; // Start with just problem line + 1 empty line
 const LINE_NUMBER_WIDTH = 40;
+const PROBLEM_LINE_INDEX = 0; // Problem is displayed on the first line
 
 type AttemptMeta = { attemptId: string; userId: string };
 type LineStatus = 'empty' | 'current' | 'correct' | 'incorrect' | 'uncertain';
@@ -78,7 +79,8 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
       status: i === 0 ? 'current' : 'empty' as LineStatus
     }))
   );
-  const [penModalVisible, setPenModalVisible] = useState(false);
+  const [settingsExpanded, setSettingsExpanded] = useState(false);
+  const [clearConfirmPending, setClearConfirmPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lastValidation, setLastValidation] = useState<ValidationResult | null>(null);
   const [attemptMeta, setAttemptMeta] = useState<AttemptMeta | null>(null);
@@ -89,6 +91,7 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
   const [snapshotOnlyActive, setSnapshotOnlyActive] = useState(false);
   const [snapshotScale, setSnapshotScale] = useState(1);
   const [expandedHints, setExpandedHints] = useState<Set<number>>(new Set());
+  const [inlineHint, setInlineHint] = useState<{ lineIndex: number; hint: HintResult } | null>(null);
 
   const canvasHeight = lineCount * LINE_HEIGHT + 20;
 
@@ -124,6 +127,23 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
     clearAll,
     hydrateFromRemote,
   } = useAttemptCanvasStore();
+
+  // Reset canvas when problem changes
+  useEffect(() => {
+    clearAll();
+    setLastValidation(null);
+    setLastHint(null);
+    setInlineHint(null);
+    setHintAudio(null);
+    setConsecutiveNonProgress(0);
+    setAttemptMeta(null);
+    setLines(Array.from({ length: INITIAL_LINES }, (_, i) => ({
+      index: i + 1,
+      status: i === 0 ? 'current' : 'empty' as LineStatus
+    })));
+    setLineCount(INITIAL_LINES);
+    setExpandedHints(new Set());
+  }, [problemBody, clearAll]);
 
   const stopHintAudio = useCallback(async () => {
     if (!hintSoundRef.current) return;
@@ -179,6 +199,23 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
 
   const canvasDrawWidth = CANVAS_WIDTH - LINE_NUMBER_WIDTH - 50;
 
+  const addNewLine = useCallback(() => {
+    setLineCount(prev => prev + 1);
+    setLines(prev => [...prev, {
+      index: prev.length + 1,
+      status: 'empty' as LineStatus
+    }]);
+  }, []);
+
+  // Track if we need to add a new line when drawing on the last line
+  const checkAndAddLine = useCallback((y: number) => {
+    const currentLineIndex = Math.floor(y / LINE_HEIGHT);
+    // If drawing on the last visible line (excluding problem line), add a new line
+    if (currentLineIndex >= lineCount - 1 && currentLineIndex > 0) {
+      addNewLine();
+    }
+  }, [lineCount, addNewLine]);
+
   const panGesture = useMemo(() => {
     return Gesture.Pan()
       .runOnJS(true)
@@ -189,6 +226,8 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
         const y = clamp(e.y, 0, canvasHeight);
         lastPtRef.current = { x, y };
         addPoint(id, { x, y });
+        // Check if we need to add a new line
+        checkAndAddLine(y);
       })
       .onChange((e) => {
         const id = strokeIdRef.current ?? ensureStrokeStart();
@@ -204,7 +243,7 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
         strokeIdRef.current = null;
         lastPtRef.current = null;
       });
-  }, [addPoint, ensureStrokeStart, canvasHeight, canvasDrawWidth]);
+  }, [addPoint, ensureStrokeStart, canvasHeight, canvasDrawWidth, checkAndAddLine]);
 
   // Draw line guides
   const guides = useMemo(() => {
@@ -219,8 +258,8 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
           key={`line-${i}`}
           path={p}
           style="stroke"
-          strokeWidth={1}
-          color="#E5E7EB"
+          strokeWidth={2}
+          color="#D1D5DB"
         />
       );
     }
@@ -272,14 +311,6 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
     setAttemptMeta(meta);
     return meta;
   }
-
-  const addNewLine = useCallback(() => {
-    setLineCount(prev => prev + 1);
-    setLines(prev => [...prev, {
-      index: prev.length + 1,
-      status: 'empty' as LineStatus
-    }]);
-  }, []);
 
   const updateLineStatus = useCallback((lineIndex: number, status: LineStatus, hint?: string) => {
     setLines(prev => prev.map((line, i) => {
@@ -387,7 +418,7 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
           problemText = splitMultiLineLatex(ocr.latex);
         }
 
-        if (problemText && idx > 0) {
+        if (problemText) {
           let prevLatex: string | undefined = undefined;
           if (idx > 0) {
             const { data: prev } = await supabase
@@ -400,6 +431,7 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
               .maybeSingle();
             prevLatex = prev?.ocr_latex ?? undefined;
           }
+          // For idx === 0, prevLatex stays undefined (first user step compares to problem)
 
           const processedCurr = splitMultiLineLatex(ocr.latex);
           const validation = await invokeSolveStep({ prevLatex, currLatex: processedCurr, problem: problemText });
@@ -412,19 +444,26 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
           if (validation.status === 'correct_useful') {
             nextConsecutive = 0;
             lineStatus = 'correct';
+            setInlineHint(null); // Clear hint on success
             onSolved?.();
           } else if (validation.status === 'correct_not_useful') {
             nextConsecutive = consecutiveNonProgress + 1;
             lineStatus = 'uncertain';
             hintPayload = computeHint({ status: validation.status, consecutiveNonProgress: nextConsecutive });
+            // Show hint inline after the next line (idx + 2 because line 0 is problem, idx+1 is where user wrote)
+            if (hintPayload) setInlineHint({ lineIndex: idx + 2, hint: hintPayload });
           } else if (validation.status === 'incorrect') {
             nextConsecutive = consecutiveNonProgress + 1;
             lineStatus = 'incorrect';
             hintPayload = computeHint({ status: validation.status, consecutiveNonProgress: nextConsecutive });
+            // Show hint inline after the next line
+            if (hintPayload) setInlineHint({ lineIndex: idx + 2, hint: hintPayload });
           } else {
             nextConsecutive = consecutiveNonProgress + 1;
             lineStatus = 'uncertain';
             hintPayload = computeHint({ status: validation.status, consecutiveNonProgress: nextConsecutive });
+            // Show hint inline after the next line
+            if (hintPayload) setInlineHint({ lineIndex: idx + 2, hint: hintPayload });
           }
 
           setConsecutiveNonProgress(nextConsecutive);
@@ -442,8 +481,6 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
               hint_text: hintPayload ? hintPayload.text : null,
             })
             .eq('id', up.stepId);
-        } else if (idx === 0) {
-          updateLineStatus(idx, 'correct');
         }
       } catch (ocrErr) {
         console.warn('OCR failed:', ocrErr);
@@ -463,6 +500,7 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
     await stopHintAudio();
     setLastValidation(null);
     setLastHint(null);
+    setInlineHint(null);
     setHintAudio(null);
     setConsecutiveNonProgress(0);
     setLines(Array.from({ length: INITIAL_LINES }, (_, i) => ({
@@ -496,264 +534,429 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
     }
   }, [clearAll, stopHintAudio]);
 
-  // Pen Settings Modal
-  const PenSettingsModal = () => (
-    <Modal
-      visible={penModalVisible}
-      transparent
-      animationType="fade"
-      onRequestClose={() => setPenModalVisible(false)}
-    >
-      <Pressable
-        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-end' }}
-        onPress={() => setPenModalVisible(false)}
-      >
-        <Pressable
-          style={{
-            backgroundColor: 'white',
-            borderTopLeftRadius: 24,
-            borderTopRightRadius: 24,
-            padding: 24,
-            paddingBottom: 40,
-          }}
-          onPress={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: '#1F2937' }}>Pen Settings</Text>
-            <Pressable onPress={() => setPenModalVisible(false)}>
-              <Ionicons name="close" size={24} color="#6B7280" />
-            </Pressable>
-          </View>
+  // Reset clear confirmation after 3 seconds if not confirmed
+  useEffect(() => {
+    if (clearConfirmPending) {
+      const timeout = setTimeout(() => {
+        setClearConfirmPending(false);
+      }, 3000);
+      return () => clearTimeout(timeout);
+    }
+  }, [clearConfirmPending]);
 
-          {/* Tool Toggle */}
-          <View style={{ marginBottom: 20 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#6B7280', marginBottom: 12 }}>Tool</Text>
-            <View style={{ flexDirection: 'row', gap: 12 }}>
+  const handleClearPress = useCallback(() => {
+    if (clearConfirmPending) {
+      // Second press - actually clear
+      setClearConfirmPending(false);
+      handleClear();
+    } else {
+      // First press - show confirmation
+      setClearConfirmPending(true);
+    }
+  }, [clearConfirmPending, handleClear]);
+
+  // Expandable Pen Settings Panel (drops down from top right)
+  const ExpandedSettings = () => {
+    if (!settingsExpanded) return null;
+
+    return (
+      <View
+        style={{
+          position: 'absolute',
+          top: 56,
+          right: 12,
+          backgroundColor: 'white',
+          borderRadius: 16,
+          padding: 12,
+          shadowColor: '#000',
+          shadowOpacity: 0.15,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: 8,
+          width: 140,
+          zIndex: 100,
+        }}
+      >
+        {/* Colors - 2 columns, 3 rows */}
+        <View style={{ marginBottom: 12 }}>
+          <Text style={{ fontSize: 11, fontWeight: '600', color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase' }}>Color</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {COLORS.map((c) => (
               <Pressable
-                onPress={() => setToolMode('pen')}
+                key={c}
+                onPress={() => setColor(c)}
                 style={{
-                  flex: 1,
-                  paddingVertical: 12,
-                  borderRadius: 12,
-                  backgroundColor: mode === 'pen' ? '#0EA5E9' : '#F3F4F6',
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: c,
+                  borderWidth: c === color ? 2 : 0,
+                  borderColor: '#1F2937',
                   alignItems: 'center',
+                  justifyContent: 'center',
                 }}
               >
-                <Ionicons name="pencil" size={20} color={mode === 'pen' ? 'white' : '#6B7280'} />
-                <Text style={{ marginTop: 4, color: mode === 'pen' ? 'white' : '#6B7280', fontWeight: '600' }}>Pen</Text>
+                {c === color && <Ionicons name="checkmark" size={16} color="white" />}
               </Pressable>
+            ))}
+          </View>
+        </View>
+
+        {/* Thickness - 2 columns, 2 rows */}
+        <View>
+          <Text style={{ fontSize: 11, fontWeight: '600', color: '#9CA3AF', marginBottom: 8, textTransform: 'uppercase' }}>Size</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {WIDTHS.map((w) => (
               <Pressable
-                onPress={() => setToolMode('eraser')}
+                key={w}
+                onPress={() => setStrokeWidth(w)}
                 style={{
-                  flex: 1,
-                  paddingVertical: 12,
-                  borderRadius: 12,
-                  backgroundColor: mode === 'eraser' ? '#0EA5E9' : '#F3F4F6',
-                  alignItems: 'center',
-                }}
-              >
-                <Ionicons name="trash-outline" size={20} color={mode === 'eraser' ? 'white' : '#6B7280'} />
-                <Text style={{ marginTop: 4, color: mode === 'eraser' ? 'white' : '#6B7280', fontWeight: '600' }}>Eraser</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {/* Colors */}
-          <View style={{ marginBottom: 20 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#6B7280', marginBottom: 12 }}>Color</Text>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              {COLORS.map((c) => (
-                <Pressable
-                  key={c}
-                  onPress={() => setColor(c)}
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 22,
-                    backgroundColor: c,
-                    borderWidth: c === color ? 3 : 0,
-                    borderColor: '#1F2937',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {c === color && <Ionicons name="checkmark" size={20} color="white" />}
-                </Pressable>
-              ))}
-            </View>
-          </View>
-
-          {/* Thickness */}
-          <View>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#6B7280', marginBottom: 12 }}>Thickness</Text>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              {WIDTHS.map((w) => (
-                <Pressable
-                  key={w}
-                  onPress={() => setStrokeWidth(w)}
-                  style={{
-                    width: 56,
-                    height: 56,
-                    borderRadius: 12,
-                    backgroundColor: w === strokeWidth ? '#E0F2FE' : '#F3F4F6',
-                    borderWidth: w === strokeWidth ? 2 : 0,
-                    borderColor: '#0EA5E9',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <View
-                    style={{
-                      width: w * 2,
-                      height: w * 2,
-                      backgroundColor: color,
-                      borderRadius: w
-                    }}
-                  />
-                </Pressable>
-              ))}
-            </View>
-          </View>
-
-          {/* Actions */}
-          <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
-            <Pressable
-              onPress={undo}
-              style={{
-                flex: 1,
-                paddingVertical: 14,
-                borderRadius: 12,
-                backgroundColor: '#F3F4F6',
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-              }}
-            >
-              <Ionicons name="arrow-undo" size={20} color="#6B7280" />
-              <Text style={{ color: '#6B7280', fontWeight: '600' }}>Undo</Text>
-            </Pressable>
-            <Pressable
-              onPress={handleClear}
-              style={{
-                flex: 1,
-                paddingVertical: 14,
-                borderRadius: 12,
-                backgroundColor: '#FEE2E2',
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-              }}
-            >
-              <Ionicons name="trash" size={20} color="#EF4444" />
-              <Text style={{ color: '#EF4444', fontWeight: '600' }}>Clear All</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-
-  return (
-    <View style={{ flex: 1, backgroundColor: 'white' }}>
-      {/* Canvas Area with Line Numbers */}
-      <ScrollView
-        ref={scrollViewRef}
-        style={{ flex: 1 }}
-        contentContainerStyle={{ minHeight: canvasHeight }}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={{ flexDirection: 'row', flex: 1 }}>
-          {/* Line Numbers Column */}
-          <View style={{ width: LINE_NUMBER_WIDTH, paddingTop: LINE_HEIGHT / 2 - 12 }}>
-            {lines.map((line, i) => (
-              <View
-                key={i}
-                style={{
-                  height: LINE_HEIGHT,
+                  width: 36,
+                  height: 36,
+                  borderRadius: 8,
+                  backgroundColor: w === strokeWidth ? '#E0F2FE' : '#F3F4F6',
+                  borderWidth: w === strokeWidth ? 2 : 0,
+                  borderColor: '#0EA5E9',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
                 <View
                   style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: 14,
-                    backgroundColor: getStatusColor(line.status),
+                    width: w * 1.5,
+                    height: w * 1.5,
+                    backgroundColor: color,
+                    borderRadius: w
+                  }}
+                />
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#FDF8F3' }}>
+      {/* Top Right Toolbar */}
+      <View
+        style={{
+          position: 'absolute',
+          top: 8,
+          right: 12,
+          zIndex: 50,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        {/* Pen/Eraser Toggle */}
+        <View
+          style={{
+            flexDirection: 'row',
+            backgroundColor: '#F3F4F6',
+            borderRadius: 18,
+            padding: 4,
+            gap: 2,
+          }}
+        >
+          <Pressable
+            onPress={() => setToolMode('pen')}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 14,
+              backgroundColor: mode === 'pen' ? '#0EA5E9' : 'transparent',
+            }}
+          >
+            <Ionicons name="pencil" size={18} color={mode === 'pen' ? 'white' : '#6B7280'} />
+          </Pressable>
+          <Pressable
+            onPress={() => setToolMode('eraser')}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 14,
+              backgroundColor: mode === 'eraser' ? '#0EA5E9' : 'transparent',
+            }}
+          >
+            <Ionicons name="cut-outline" size={18} color={mode === 'eraser' ? 'white' : '#6B7280'} />
+          </Pressable>
+        </View>
+
+        {/* Undo Button */}
+        <Pressable
+          onPress={undo}
+          style={({ pressed }) => ({
+            width: 36,
+            height: 36,
+            borderRadius: 18,
+            backgroundColor: pressed ? '#E5E7EB' : '#F3F4F6',
+            alignItems: 'center',
+            justifyContent: 'center',
+          })}
+        >
+          <Ionicons name="arrow-undo" size={18} color="#6B7280" />
+        </Pressable>
+
+        {/* Clear Button - with confirmation */}
+        <Pressable
+          onPress={handleClearPress}
+          style={({ pressed }) => ({
+            width: 36,
+            height: 36,
+            borderRadius: 18,
+            backgroundColor: clearConfirmPending
+              ? '#EF4444'
+              : pressed ? '#FEE2E2' : '#F3F4F6',
+            alignItems: 'center',
+            justifyContent: 'center',
+          })}
+        >
+          <Ionicons
+            name={clearConfirmPending ? "trash" : "trash-outline"}
+            size={18}
+            color={clearConfirmPending ? 'white' : '#EF4444'}
+          />
+        </Pressable>
+
+        {/* Color/Settings Button */}
+        <Pressable
+          onPress={() => setSettingsExpanded(!settingsExpanded)}
+          style={({ pressed }) => ({
+            width: 36,
+            height: 36,
+            borderRadius: 18,
+            backgroundColor: settingsExpanded ? '#0EA5E9' : pressed ? '#E0F2FE' : '#F3F4F6',
+            alignItems: 'center',
+            justifyContent: 'center',
+          })}
+        >
+          <View
+            style={{
+              width: 18,
+              height: 18,
+              borderRadius: 9,
+              backgroundColor: settingsExpanded ? 'white' : color,
+              borderWidth: 2,
+              borderColor: settingsExpanded ? 'white' : '#E5E7EB',
+            }}
+          />
+        </Pressable>
+      </View>
+
+      <ExpandedSettings />
+
+      {/* Canvas Area with Line Numbers */}
+      <ScrollView
+        ref={scrollViewRef}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ minHeight: canvasHeight + (inlineHint && inlineHint.hint ? 80 : 0) }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={{ flexDirection: 'row', flex: 1 }}>
+          {/* Line Numbers Column */}
+          <View style={{ width: LINE_NUMBER_WIDTH, paddingTop: LINE_HEIGHT / 2 - 12 }}>
+            {lines.map((line, i) => (
+              <React.Fragment key={i}>
+                <View
+                  style={{
+                    height: LINE_HEIGHT,
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
                 >
-                  <Text
-                    style={{
-                      color: line.status === 'empty' ? '#9CA3AF' : 'white',
-                      fontSize: 13,
-                      fontWeight: '700'
-                    }}
-                  >
-                    {line.index}
-                  </Text>
+                  {i === PROBLEM_LINE_INDEX ? (
+                    /* Problem indicator - "Q" for question */
+                    <View
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 14,
+                        backgroundColor: '#0EA5E9',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: 'white',
+                          fontSize: 13,
+                          fontWeight: '700'
+                        }}
+                      >
+                        1
+                      </Text>
+                    </View>
+                  ) : (
+                    <View
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 14,
+                        backgroundColor: getStatusColor(line.status),
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: line.status === 'empty' ? '#9CA3AF' : 'white',
+                          fontSize: 13,
+                          fontWeight: '700'
+                        }}
+                      >
+                        {line.index}
+                      </Text>
+                    </View>
+                  )}
                 </View>
-              </View>
+                {/* Inline hint spacer in line numbers column */}
+                {inlineHint && inlineHint.hint && inlineHint.lineIndex === i && (
+                  <View style={{ height: 80 }} />
+                )}
+              </React.Fragment>
             ))}
           </View>
 
           {/* Canvas */}
           <View style={{ flex: 1 }}>
             <GestureDetector gesture={panGesture}>
-              <Canvas
-                ref={canvasRef}
-                style={{ flex: 1, height: canvasHeight, backgroundColor: 'white' }}
-              >
-                <Group>
-                  {!snapshotOnlyActive && guides}
-                  {!snapshotOnlyActive && committedLayers.flat().map((s) => renderStroke(s))}
-                  <Group transform={[{ scale: snapshotOnlyActive ? snapshotScale : 1 }]}>
-                    {activeStrokes.map((s) => renderStroke(s))}
+              <View style={{ flex: 1, height: canvasHeight }}>
+                <Canvas
+                  ref={canvasRef}
+                  style={{ flex: 1, height: canvasHeight, backgroundColor: '#FDF8F3' }}
+                >
+                  <Group>
+                    <Group opacity={snapshotOnlyActive ? 0 : 1}>
+                      {guides}
+                      {committedLayers.flat().map((s) => renderStroke(s))}
+                    </Group>
+                    <Group transform={[{ scale: snapshotOnlyActive ? snapshotScale : 1 }]}>
+                      {activeStrokes.map((s) => renderStroke(s))}
+                    </Group>
                   </Group>
-                </Group>
-              </Canvas>
+                </Canvas>
+                {/* Problem text overlay on first line */}
+                {problemBody && !snapshotOnlyActive && (
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: LINE_HEIGHT,
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 28,
+                        fontWeight: '700',
+                        color: '#1F2937',
+                        fontFamily: 'Nunito_700Bold',
+                      }}
+                      numberOfLines={1}
+                    >
+                      {problemBody}
+                    </Text>
+                  </View>
+                )}
+              </View>
             </GestureDetector>
           </View>
 
           {/* Hints Column */}
           <View style={{ width: 50, paddingTop: LINE_HEIGHT / 2 - 12 }}>
             {lines.map((line, i) => (
-              <View
-                key={i}
-                style={{
-                  height: LINE_HEIGHT,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                {line.hint && (
-                  <Pressable
-                    onPress={() => toggleHintExpanded(i)}
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 14,
-                      backgroundColor: '#FEF3C7',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Ionicons
-                      name={expandedHints.has(i) ? "chevron-back" : "chevron-forward"}
-                      size={16}
-                      color="#F59E0B"
-                    />
-                  </Pressable>
+              <React.Fragment key={i}>
+                <View
+                  style={{
+                    height: LINE_HEIGHT,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {line.hint && (
+                    <Pressable
+                      onPress={() => toggleHintExpanded(i)}
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 14,
+                        backgroundColor: '#FEF3C7',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Ionicons
+                        name={expandedHints.has(i) ? "chevron-back" : "chevron-forward"}
+                        size={16}
+                        color="#F59E0B"
+                      />
+                    </Pressable>
+                  )}
+                </View>
+                {/* Inline hint spacer in hints column */}
+                {inlineHint && inlineHint.hint && inlineHint.lineIndex === i && (
+                  <View style={{ height: 80 }} />
                 )}
-              </View>
+              </React.Fragment>
             ))}
           </View>
         </View>
+
+        {/* Inline Hint - Shows below specific line when user makes mistake */}
+        {inlineHint && inlineHint.hint && (
+          <View
+            style={{
+              position: 'absolute',
+              top: (inlineHint.lineIndex + 1) * LINE_HEIGHT + LINE_HEIGHT / 2 - 12,
+              left: LINE_NUMBER_WIDTH,
+              right: 50,
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+              backgroundColor: inlineHint.hint.status === 'incorrect' ? '#FEF2F2' : '#FFFBEB',
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: inlineHint.hint.status === 'incorrect' ? '#FECACA' : '#FDE68A',
+              marginHorizontal: 8,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+              <Ionicons
+                name={inlineHint.hint.status === 'incorrect' ? 'alert-circle' : 'information-circle'}
+                size={20}
+                color={inlineHint.hint.status === 'incorrect' ? '#EF4444' : '#F59E0B'}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={{
+                  fontSize: 13,
+                  fontWeight: '600',
+                  color: inlineHint.hint.status === 'incorrect' ? '#DC2626' : '#D97706',
+                  marginBottom: 2,
+                  fontFamily: 'Nunito_600SemiBold',
+                }}>
+                  {inlineHint.hint.status === 'incorrect' ? 'Not quite right' : 'Hint'}
+                  {inlineHint.hint.level > 1 && ` (Level ${inlineHint.hint.level})`}
+                </Text>
+                <Text style={{
+                  fontSize: 13,
+                  color: '#374151',
+                  lineHeight: 18,
+                  fontFamily: 'Nunito_400Regular',
+                }}>
+                  {inlineHint.hint.text}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
       </ScrollView>
+
 
       {/* Expanded Hint Overlay */}
       {Array.from(expandedHints).map(lineIndex => {
@@ -784,74 +987,17 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
         );
       })}
 
-      {/* Bottom Controls */}
-      <View
-        style={{
-          position: 'absolute',
-          bottom: 30,
-          left: 0,
-          right: 0,
-          flexDirection: 'row',
-          justifyContent: 'center',
-          alignItems: 'center',
-          paddingHorizontal: 20,
-        }}
-      >
-        {/* Microphone Button - Center */}
-        <Pressable
-          onPress={() => {/* TODO: Voice input */}}
-          style={({ pressed }) => ({
-            width: 56,
-            height: 56,
-            borderRadius: 28,
-            backgroundColor: pressed ? '#F3F4F6' : 'white',
-            alignItems: 'center',
-            justifyContent: 'center',
-            shadowColor: '#000',
-            shadowOpacity: 0.1,
-            shadowRadius: 8,
-            shadowOffset: { width: 0, height: 2 },
-            elevation: 4,
-          })}
-        >
-          <Ionicons name="mic-outline" size={28} color="#6B7280" />
-        </Pressable>
-      </View>
-
-      {/* Floating Pen Button - Bottom Right */}
-      <Pressable
-        onPress={() => setPenModalVisible(true)}
-        style={({ pressed }) => ({
-          position: 'absolute',
-          bottom: 30,
-          right: 20,
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          backgroundColor: pressed ? '#0284C7' : '#0EA5E9',
-          alignItems: 'center',
-          justifyContent: 'center',
-          shadowColor: '#0EA5E9',
-          shadowOpacity: 0.4,
-          shadowRadius: 8,
-          shadowOffset: { width: 0, height: 4 },
-          elevation: 6,
-        })}
-      >
-        <Ionicons name="pencil" size={24} color="white" />
-      </Pressable>
-
-      {/* Next Line Button - Bottom Left */}
+      {/* Floating Done Button - Top Left (after line numbers) */}
       <Pressable
         onPress={onCommit}
         disabled={busy || activeStrokes.length === 0}
         style={({ pressed }) => ({
           position: 'absolute',
-          bottom: 30,
-          left: 20,
+          top: 8,
+          left: LINE_NUMBER_WIDTH + 8,
           paddingHorizontal: 20,
-          paddingVertical: 14,
-          borderRadius: 28,
+          paddingVertical: 12,
+          borderRadius: 24,
           backgroundColor: busy || activeStrokes.length === 0
             ? '#E5E7EB'
             : pressed ? '#059669' : '#10B981',
@@ -880,8 +1026,6 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
           {busy ? 'Checking...' : 'Done'}
         </Text>
       </Pressable>
-
-      <PenSettingsModal />
     </View>
   );
 }
