@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, TextInput } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, Dimensions } from 'react-native';
 import { Canvas, Path as SkPathComponent, Skia, useCanvasRef, Group } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useAttemptCanvasStore, type Stroke, type StrokePoint } from '../stores/attemptStore';
@@ -13,13 +13,31 @@ import { computeHint, type HintResult } from '../services/hints';
 import { requestHintSpeech, type TtsResponse, fetchHintSpeechUrl } from '../services/hintVoice';
 import { Audio } from 'expo-av';
 import Constants from 'expo-constants';
-import { Card } from './ui/Card';
-import { Button } from './ui/Button';
+import { Ionicons } from '@expo/vector-icons';
 
-const CANVAS_WIDTH = 1920;
-const CANVAS_HEIGHT = 1080;
-const HINT_LEVEL_LABELS = ['', 'Nudge', 'Directional hint', 'Micro-step'];
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const CANVAS_WIDTH = SCREEN_WIDTH;
+const LINE_HEIGHT = 65;
+const INITIAL_LINES = 6;
+const LINE_NUMBER_WIDTH = 40;
+
 type AttemptMeta = { attemptId: string; userId: string };
+type LineStatus = 'empty' | 'current' | 'correct' | 'incorrect' | 'uncertain';
+
+interface LineData {
+  index: number;
+  status: LineStatus;
+  hint?: string;
+  hintExpanded?: boolean;
+}
+
+interface HandwritingCanvasProps {
+  problemBody?: string;
+  onSolved?: () => void;
+}
+
+const COLORS = ['#0EA5E9', '#111111', '#16a34a', '#f59e0b', '#ef4444', '#8B5CF6'];
+const WIDTHS = [3, 5, 7, 9];
 
 function splitMultiLineLatex(input: string): string {
   const raw = (input ?? '').replace(/\r\n|\r|\n/g, '\\\\');
@@ -37,31 +55,46 @@ function pathFromPoints(points: StrokePoint[]) {
   return p;
 }
 
-const COLORS = ['#111111', '#2563eb', '#0ea5e9', '#16a34a', '#f59e0b', '#ef4444'];
-const WIDTHS = [4, 6, 8, 10, 14];
+function getStatusColor(status: LineStatus): string {
+  switch (status) {
+    case 'correct': return '#16a34a';
+    case 'incorrect': return '#ef4444';
+    case 'current': return '#0EA5E9';
+    case 'uncertain': return '#f59e0b';
+    default: return '#E5E7EB';
+  }
+}
 
-export default function HandwritingCanvas() {
+export default function HandwritingCanvas({ problemBody, onSolved }: HandwritingCanvasProps) {
   const canvasRef = useCanvasRef();
+  const scrollViewRef = useRef<ScrollView>(null);
   const strokeIdRef = useRef<string | null>(null);
   const hintSoundRef = useRef<Audio.Sound | null>(null);
-  const [snapshotOnlyActive, setSnapshotOnlyActive] = useState(false);
-  const [snapshotScale, setSnapshotScale] = useState(1);
+
+  const [lineCount, setLineCount] = useState(INITIAL_LINES);
+  const [lines, setLines] = useState<LineData[]>(() =>
+    Array.from({ length: INITIAL_LINES }, (_, i) => ({
+      index: i + 1,
+      status: i === 0 ? 'current' : 'empty' as LineStatus
+    }))
+  );
+  const [penModalVisible, setPenModalVisible] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [debugLog, setDebugLog] = useState<string[]>([]);
-  const [commitMsg, setCommitMsg] = useState<string | null>(null);
-  const [lastOcr, setLastOcr] = useState<{ stepId: string; latex: string; confidence: number } | null>(null);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editLatex, setEditLatex] = useState('');
-  const [showOcrPanel, setShowOcrPanel] = useState(true);
-  const [ocrError, setOcrError] = useState<string | null>(null);
   const [lastValidation, setLastValidation] = useState<ValidationResult | null>(null);
   const [attemptMeta, setAttemptMeta] = useState<AttemptMeta | null>(null);
   const [lastHint, setLastHint] = useState<HintResult | null>(null);
   const [hintAudio, setHintAudio] = useState<TtsResponse | null>(null);
   const [isPlayingHint, setIsPlayingHint] = useState(false);
-  const [ttsError, setTtsError] = useState<string | null>(null);
   const [consecutiveNonProgress, setConsecutiveNonProgress] = useState(0);
-  const [lastWasProblemSet, setLastWasProblemSet] = useState(false);
+  const [snapshotOnlyActive, setSnapshotOnlyActive] = useState(false);
+  const [snapshotScale, setSnapshotScale] = useState(1);
+  const [expandedHints, setExpandedHints] = useState<Set<number>>(new Set());
+
+  const canvasHeight = lineCount * LINE_HEIGHT + 20;
+
+  const debug = Constants.expoConfig?.extra?.EXPO_PUBLIC_DEBUG === 'true';
+  const voiceHintsEnabled = Constants.expoConfig?.extra?.EXPO_PUBLIC_VOICE_HINTS_ENABLED === 'true';
+
   useEffect(() => {
     Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false }).catch((err) => {
       console.warn('Audio mode setup failed:', err);
@@ -74,13 +107,29 @@ export default function HandwritingCanvas() {
     };
   }, []);
 
+  const {
+    mode,
+    color,
+    strokeWidth,
+    activeStrokes,
+    committedLayers,
+    stepIndex,
+    setToolMode,
+    setColor,
+    setStrokeWidth,
+    startStroke,
+    addPoint,
+    undo,
+    commitStepLocal,
+    clearAll,
+    hydrateFromRemote,
+  } = useAttemptCanvasStore();
+
   const stopHintAudio = useCallback(async () => {
     if (!hintSoundRef.current) return;
     try {
       await hintSoundRef.current.stopAsync();
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
     await hintSoundRef.current.unloadAsync().catch(() => undefined);
     hintSoundRef.current = null;
     setIsPlayingHint(false);
@@ -90,7 +139,6 @@ export default function HandwritingCanvas() {
     if (!hintAudio) return;
     try {
       setIsPlayingHint(true);
-      setTtsError(null);
       if (hintSoundRef.current) {
         await hintSoundRef.current.stopAsync().catch(() => undefined);
         await hintSoundRef.current.unloadAsync().catch(() => undefined);
@@ -115,163 +163,8 @@ export default function HandwritingCanvas() {
     } catch (err) {
       console.warn('Hint audio playback failed:', err);
       setIsPlayingHint(false);
-      setTtsError('Unable to play audio right now');
-      if (hintSoundRef.current) {
-        hintSoundRef.current.unloadAsync().catch(() => undefined);
-        hintSoundRef.current = null;
-      }
     }
   }, [hintAudio]);
-
-  const hydrateAttemptFromServer = useCallback(async (meta: AttemptMeta) => {
-    const { attemptId } = meta;
-    try {
-      const { data: steps, error } = await supabase
-        .from('attempt_steps')
-        .select('id, step_index, vector_json, ocr_latex, ocr_confidence, validation_status, validation_reason, solver_metadata, hint_level, hint_text, tts_audio_path')
-        .eq('attempt_id', attemptId)
-        .order('step_index', { ascending: true });
-      if (error) throw error;
-
-      const layers = (steps ?? []).map((step) => (Array.isArray(step.vector_json) ? step.vector_json : []) as Stroke[]);
-      const lastStep = steps && steps.length > 0 ? steps[steps.length - 1] : null;
-      const nextIndex = lastStep ? (typeof lastStep.step_index === 'number' ? lastStep.step_index + 1 : steps!.length) : 0;
-      hydrateFromRemote(layers, nextIndex);
-
-      if (!lastStep) {
-        await stopHintAudio();
-        setLastOcr(null);
-        setOcrError(null);
-        setEditOpen(false);
-        setEditLatex('');
-        setShowOcrPanel(false);
-        setLastValidation(null);
-        setLastHint(null);
-        setHintAudio(null);
-        setTtsError(null);
-        setConsecutiveNonProgress(0);
-        setLastWasProblemSet(false);
-        if (layers.length === 0) {
-          setCommitMsg('Ready for a fresh attempt.');
-        }
-        return;
-      }
-
-      const confidenceValue = typeof lastStep.ocr_confidence === 'number'
-        ? lastStep.ocr_confidence
-        : typeof lastStep.ocr_confidence === 'string'
-          ? Number(lastStep.ocr_confidence)
-          : 1;
-      if (lastStep.ocr_latex) {
-        setLastOcr({ stepId: lastStep.id, latex: lastStep.ocr_latex, confidence: Number.isFinite(confidenceValue) ? confidenceValue : 1 });
-        setShowOcrPanel(true);
-        setEditLatex(lastStep.ocr_latex);
-      } else {
-        setLastOcr(null);
-        setShowOcrPanel(false);
-        setEditLatex('');
-      }
-      setOcrError(null);
-      setEditOpen(false);
-
-      if (lastStep.validation_status && lastStep.validation_reason) {
-        const validation: ValidationResult = {
-          status: lastStep.validation_status as ValidationStatus,
-          reason: lastStep.validation_reason,
-          solverMetadata: lastStep.solver_metadata ?? undefined,
-        };
-        setLastValidation(validation);
-        setLastWasProblemSet(false);
-      } else {
-        setLastValidation(null);
-        setLastWasProblemSet(lastStep.step_index === 0);
-      }
-
-      let consecutive = 0;
-      if (steps && steps.length > 0) {
-        for (let i = steps.length - 1; i >= 0; i--) {
-          const status = steps[i]?.validation_status as ValidationStatus | null | undefined;
-          if (!status || status === 'correct_useful') break;
-          if (status === 'correct_not_useful' || status === 'incorrect' || status === 'uncertain') {
-            consecutive += 1;
-          } else {
-            break;
-          }
-        }
-      }
-      setConsecutiveNonProgress(consecutive);
-
-      if (lastStep.hint_level && lastStep.hint_level > 0 && lastStep.hint_text) {
-        setLastHint({
-          level: lastStep.hint_level,
-          text: lastStep.hint_text,
-          status: (lastStep.validation_status as ValidationStatus) ?? 'uncertain',
-        });
-      } else {
-        setLastHint(null);
-      }
-
-      await stopHintAudio();
-      if (/* feature flag */ (Constants.expoConfig?.extra?.EXPO_PUBLIC_VOICE_HINTS_ENABLED === 'true') && lastStep.tts_audio_path && lastStep.hint_level && lastStep.hint_level >= 2) {
-        try {
-          const audio = await fetchHintSpeechUrl(lastStep.tts_audio_path);
-          setHintAudio(audio);
-          setTtsError(null);
-        } catch (audioErr: any) {
-          console.warn('Failed to load hint audio:', audioErr);
-          setHintAudio(null);
-          setTtsError(typeof audioErr?.message === 'string' ? audioErr.message : 'Failed to load audio');
-        }
-      } else {
-        setHintAudio(null);
-        setTtsError(null);
-      }
-      setCommitMsg(`Resumed attempt with ${steps?.length ?? 0} saved step${(steps?.length ?? 0) === 1 ? '' : 's'}.`);
-    } catch (err) {
-      console.warn('Failed to hydrate attempt:', err);
-    }
-  }, [hydrateFromRemote, stopHintAudio]);
-  useEffect(() => {
-    (async () => {
-      try {
-        const meta = await ensureAttemptId();
-        await hydrateAttemptFromServer(meta);
-      } catch (err) {
-        console.warn('Initial attempt load failed:', err);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrateAttemptFromServer]);
-  // WHY: Get debug setting from app config (loaded from .env)
-  const debug = Constants.expoConfig?.extra?.EXPO_PUBLIC_DEBUG === 'true';
-  const voiceHintsEnabled = Constants.expoConfig?.extra?.EXPO_PUBLIC_VOICE_HINTS_ENABLED === 'true';
-  const log = useCallback((msg: string) => {
-    if (!debug) return;
-    setDebugLog((prev) => {
-      const next = [...prev, msg];
-      if (next.length > 20) next.shift();
-      return next;
-    });
-    console.log('[Canvas]', msg);
-  }, [debug]);
-
-  const {
-    mode,
-    color,
-    strokeWidth,
-    activeStrokes,
-    committedLayers,
-    stepIndex,
-    setToolMode,
-    setColor,
-    setStrokeWidth,
-    startStroke,
-    addPoint,
-    undo,
-    commitStepLocal,
-    clearAll,
-    hydrateFromRemote,
-  } = useAttemptCanvasStore();
 
   const ensureStrokeStart = useCallback(() => {
     if (!strokeIdRef.current) {
@@ -284,22 +177,23 @@ export default function HandwritingCanvas() {
   const lastPtRef = useRef<StrokePoint | null>(null);
   const minPointDist = 1.5;
 
+  const canvasDrawWidth = CANVAS_WIDTH - LINE_NUMBER_WIDTH - 50;
+
   const panGesture = useMemo(() => {
     return Gesture.Pan()
       .runOnJS(true)
       .minDistance(0)
       .onBegin((e) => {
         const id = ensureStrokeStart();
-        const x = clamp(e.x, 0, CANVAS_WIDTH);
-        const y = clamp(e.y, 0, CANVAS_HEIGHT);
+        const x = clamp(e.x, 0, canvasDrawWidth);
+        const y = clamp(e.y, 0, canvasHeight);
         lastPtRef.current = { x, y };
         addPoint(id, { x, y });
-        log(`begin x=${x.toFixed(1)} y=${y.toFixed(1)}`);
       })
       .onChange((e) => {
         const id = strokeIdRef.current ?? ensureStrokeStart();
-        const x = clamp(e.x, 0, CANVAS_WIDTH);
-        const y = clamp(e.y, 0, CANVAS_HEIGHT);
+        const x = clamp(e.x, 0, canvasDrawWidth);
+        const y = clamp(e.y, 0, canvasHeight);
         const last = lastPtRef.current;
         if (!last || Math.hypot(x - last.x, y - last.y) >= minPointDist) {
           addPoint(id, { x, y });
@@ -307,31 +201,31 @@ export default function HandwritingCanvas() {
         }
       })
       .onEnd(() => {
-        log('end');
         strokeIdRef.current = null;
         lastPtRef.current = null;
       });
-  }, [addPoint, ensureStrokeStart, log]);
+  }, [addPoint, ensureStrokeStart, canvasHeight, canvasDrawWidth]);
 
+  // Draw line guides
   const guides = useMemo(() => {
-    const lines: any[] = [];
-    const gap = 120;
-    for (let y = gap; y < CANVAS_HEIGHT; y += gap) {
+    const elements: React.ReactElement[] = [];
+    for (let i = 0; i < lineCount; i++) {
+      const y = (i + 1) * LINE_HEIGHT;
       const p = Skia.Path.Make();
       p.moveTo(0, y);
-      p.lineTo(CANVAS_WIDTH, y);
-      lines.push(
+      p.lineTo(canvasDrawWidth, y);
+      elements.push(
         <SkPathComponent
-          key={`g-${y}`}
+          key={`line-${i}`}
           path={p}
           style="stroke"
-          strokeWidth={2}
-          color="#e5e7eb"
+          strokeWidth={1}
+          color="#E5E7EB"
         />
       );
     }
-    return lines;
-  }, []);
+    return elements;
+  }, [lineCount, canvasDrawWidth]);
 
   const renderStroke = (stroke: Stroke) => (
     <SkPathComponent
@@ -347,9 +241,7 @@ export default function HandwritingCanvas() {
   );
 
   async function ensureAttemptId(): Promise<AttemptMeta> {
-    if (attemptMeta) {
-      return attemptMeta;
-    }
+    if (attemptMeta) return attemptMeta;
 
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData.user?.id;
@@ -381,67 +273,57 @@ export default function HandwritingCanvas() {
     return meta;
   }
 
-  // On mount: if canvas is empty and there is a lingering attempt with a problem but no steps,
-  // clear the problem so the session starts without a pre-set equation.
-  useEffect(() => {
-    (async () => {
-      try {
-        if (activeStrokes.length === 0 && committedLayers.length === 0) {
-          const { data: userData } = await supabase.auth.getUser();
-          const userId = userData.user?.id;
-          if (!userId) return;
-          const { data: att, error: attErr } = await supabase
-            .from('attempts')
-            .select('id, problem_id')
-            .eq('user_id', userId)
-            .eq('status', 'in_progress')
-            .limit(1)
-            .maybeSingle();
-          if (attErr || !att?.id) return;
-          // Count steps; if none, and problem_id exists, unset it
-          const { data: steps, error: stepsErr } = await supabase
-            .from('attempt_steps')
-            .select('id')
-            .eq('attempt_id', att.id)
-            .limit(1);
-          if (!stepsErr && steps && steps.length === 0 && att.problem_id) {
-            await supabase
-              .from('attempts')
-              .update({ problem_id: null })
-              .eq('id', att.id);
-          }
-        }
-      } catch (e) {
-        console.warn('Init reset problem failed:', e);
+  const addNewLine = useCallback(() => {
+    setLineCount(prev => prev + 1);
+    setLines(prev => [...prev, {
+      index: prev.length + 1,
+      status: 'empty' as LineStatus
+    }]);
+  }, []);
+
+  const updateLineStatus = useCallback((lineIndex: number, status: LineStatus, hint?: string) => {
+    setLines(prev => prev.map((line, i) => {
+      if (i === lineIndex) {
+        return { ...line, status, hint };
       }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      if (i === lineIndex + 1 && status !== 'empty') {
+        return { ...line, status: 'current' as LineStatus };
+      }
+      return line;
+    }));
+  }, []);
+
+  const toggleHintExpanded = useCallback((lineIndex: number) => {
+    setExpandedHints(prev => {
+      const next = new Set(prev);
+      if (next.has(lineIndex)) {
+        next.delete(lineIndex);
+      } else {
+        next.add(lineIndex);
+      }
+      return next;
+    });
   }, []);
 
   const onCommit = useCallback(async () => {
     if (busy) return;
     if (activeStrokes.length === 0) return;
     setBusy(true);
-    
-    // Snapshot BEFORE moving active strokes into committed layers so the PNG
-    // contains only the current line without prior steps.
-    const idx = stepIndex; // current line's index before commit
-    const vectorJson = activeStrokes; // capture strokes for DB alongside PNG
-    
+
+    const idx = stepIndex;
+    const vectorJson = activeStrokes;
+
     try {
       setSnapshotOnlyActive(true);
-      // Ensure the canvas re-renders without prior committed layers before snapshotting.
-      // Skia can schedule draws slightly later; proactively request redraws and wait two frames.
       await new Promise((r) => setTimeout(r, 30));
       canvasRef.current?.redraw?.();
       await new Promise((r) => requestAnimationFrame(() => r(undefined)));
-      canvasRef.current?.redraw?.();
-      await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+
       let bytes: Uint8Array | null = null;
       let lastFileUri: string | null = null;
       let scale = 1;
-      const MAX = 2_000_000; // 2MB target
-      const t0 = Date.now();
+      const MAX = 2_000_000;
+
       for (let i = 0; i < 6; i++) {
         setSnapshotScale(scale);
         await new Promise((r) => requestAnimationFrame(() => r(undefined)));
@@ -453,573 +335,553 @@ export default function HandwritingCanvas() {
         if (scale < 0.4) break;
       }
       if (!bytes) throw new Error('Snapshot failed');
-      const snapshotMs = Date.now() - t0;
 
-      // Now commit locally (moves active -> committed and bumps index)
-      const _ignored = commitStepLocal();
+      commitStepLocal();
+
+      // Add new line if needed
+      if (stepIndex >= lineCount - 1) {
+        addNewLine();
+      }
+
+      // Update current line status
+      updateLineStatus(idx, 'current');
 
       const { userId, attemptId } = await ensureAttemptId();
-
-      const t1 = Date.now();
       const up = await uploadStepPng({ userId, attemptId, stepIndex: idx, bytes, vectorJson });
-      const uploadMs = Date.now() - t1;
-      console.log('[commit] snapshotMs=', snapshotMs, 'uploadMs=', uploadMs);
-      setCommitMsg(`Saved step ${idx} → ${userId}/${attemptId}/${idx}.png`);
 
-      // OCR: read base64 and invoke Edge Function
-      if (!up?.stepId) throw new Error('No stepId returned from insert');
+      if (!up?.stepId) throw new Error('No stepId returned');
       if (!lastFileUri) throw new Error('No snapshot file path');
-      // Some environments may not expose EncodingType; fall back to 'base64' literal
+
       const encoding: any = (FileSystem as any).EncodingType?.Base64 ?? 'base64';
       const base64 = await FileSystem.readAsStringAsync(lastFileUri, { encoding });
-      // Run OCR in a separate try/catch so upload success isn't marked as commit failure
-      try {
-        console.log('[commit] invoking OCR…');
-        const ocr = await invokeOcrLatex({ attemptId, stepId: up.stepId, imageBase64: base64 });
-        setLastOcr({ stepId: up.stepId, latex: ocr.latex, confidence: ocr.confidence });
-        setOcrError(null);
-        setShowOcrPanel(true);
-        setEditOpen(false);
-        setEditLatex(ocr.latex);
 
-        // Persist OCR fields on row
-        const { error: updErr } = await supabase
+      try {
+        const ocr = await invokeOcrLatex({ attemptId, stepId: up.stepId, imageBase64: base64 });
+
+        await supabase
           .from('attempt_steps')
           .update({ ocr_latex: ocr.latex, ocr_confidence: ocr.confidence })
           .eq('id', up.stepId);
-        if (updErr) {
-          console.warn('Failed to persist OCR fields:', updErr);
-        }
 
-        // STEP VALIDATION: fetch problem text and previous LaTeX, then invoke
-        try {
-          let problemText: string | null = null;
-          // Try to get current attempt's problem
-          const { data: att, error: attErr } = await supabase
+        // Validation logic
+        let problemText: string | null = problemBody || null;
+
+        if (!problemText) {
+          const { data: att } = await supabase
             .from('attempts')
             .select('problem_id')
             .eq('id', attemptId)
             .single();
-          if (attErr) console.warn('attempts query failed, will fallback to first problem:', attErr);
+
           if (att?.problem_id) {
-            const { data: prob, error: probErr } = await supabase
+            const { data: prob } = await supabase
               .from('problems')
               .select('body')
               .eq('id', att.problem_id)
               .single();
-            if (!probErr) problemText = prob?.body ?? null; else console.warn('problem fetch failed:', probErr);
+            problemText = prob?.body ?? null;
           }
-          // NOTE: Do NOT fallback to any global/default problem.
-          // Only use attempt's linked problem, or derive from steps below.
+        }
 
-          // Fallback: derive problem from first step's OCR (or current step if step 0)
-          if (!problemText) {
-            // Try to use step 0 OCR as the problem for this attempt
-            const { data: firstStep, error: fsErr } = await supabase
+        if (!problemText && idx === 0) {
+          problemText = splitMultiLineLatex(ocr.latex);
+        }
+
+        if (problemText && idx > 0) {
+          let prevLatex: string | undefined = undefined;
+          if (idx > 0) {
+            const { data: prev } = await supabase
               .from('attempt_steps')
               .select('ocr_latex')
               .eq('attempt_id', attemptId)
-              .eq('step_index', 0)
+              .eq('step_index', idx - 1)
+              .order('created_at', { ascending: false })
+              .limit(1)
               .maybeSingle();
-            if (!fsErr && firstStep?.ocr_latex) {
-              problemText = splitMultiLineLatex(firstStep.ocr_latex);
-            }
-          }
-          if (!problemText && idx === 0) {
-            // As last resort for the first step, treat this line as the problem
-            problemText = splitMultiLineLatex(ocr.latex);
-          }
-          // If we derived a problem and the attempt has none, persist it
-          if (problemText && !(att?.problem_id)) {
-            const { data: insProb, error: insProbErr } = await supabase
-              .from('problems')
-              .insert({ title: 'Ad-hoc', body: problemText })
-              .select('id')
-              .single();
-            if (!insProbErr && insProb?.id) {
-              const { error: attUpdErr } = await supabase
-                .from('attempts')
-                .update({ problem_id: insProb.id })
-                .eq('id', attemptId);
-              if (attUpdErr) {
-                console.warn('Failed to set attempt.problem_id:', attUpdErr);
-              }
-            } else if (insProbErr) {
-              console.warn('Failed to persist derived problem:', insProbErr);
-            }
+            prevLatex = prev?.ocr_latex ?? undefined;
           }
 
-          if (!problemText) {
-            console.warn('No problem text available; skipping validation');
+          const processedCurr = splitMultiLineLatex(ocr.latex);
+          const validation = await invokeSolveStep({ prevLatex, currLatex: processedCurr, problem: problemText });
+          setLastValidation(validation);
+
+          let nextConsecutive = consecutiveNonProgress;
+          let hintPayload: HintResult | null = null;
+          let lineStatus: LineStatus = 'uncertain';
+
+          if (validation.status === 'correct_useful') {
+            nextConsecutive = 0;
+            lineStatus = 'correct';
+            onSolved?.();
+          } else if (validation.status === 'correct_not_useful') {
+            nextConsecutive = consecutiveNonProgress + 1;
+            lineStatus = 'uncertain';
+            hintPayload = computeHint({ status: validation.status, consecutiveNonProgress: nextConsecutive });
+          } else if (validation.status === 'incorrect') {
+            nextConsecutive = consecutiveNonProgress + 1;
+            lineStatus = 'incorrect';
+            hintPayload = computeHint({ status: validation.status, consecutiveNonProgress: nextConsecutive });
           } else {
-            // prevLatex from previous step if exists
-            let prevLatex: string | undefined = undefined;
-            if (idx > 0) {
-              // Defensive: fetch the most recent matching row in case of duplicates
-              const { data: prev, error: prevErr } = await supabase
-                .from('attempt_steps')
-                .select('ocr_latex')
-                .eq('attempt_id', attemptId)
-                .eq('step_index', idx - 1)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-              if (!prevErr) prevLatex = prev?.ocr_latex ?? undefined; else console.warn('prev step fetch failed:', prevErr);
-            }
-
-            const processedCurr = splitMultiLineLatex(ocr.latex);
-            if (idx === 0) {
-              // First line: treat as problem capture only; do NOT validate
-              setLastValidation(null);
-              setLastHint(null);
-              setLastWasProblemSet(true);
-              setConsecutiveNonProgress(0);
-              await stopHintAudio();
-              setHintAudio(null);
-              setTtsError(null);
-              setCommitMsg('Equation captured as the problem.');
-            } else {
-              // Capture previous line's validation status before we validate the new line
-              const prevStatus = lastValidation?.status;
-              const validation = await invokeSolveStep({ prevLatex, currLatex: processedCurr, problem: problemText });
-              setLastWasProblemSet(false);
-              setLastValidation(validation);
-              let nextConsecutive = consecutiveNonProgress;
-              let hintPayload: HintResult | null = null;
-              if (validation.status === 'correct_useful') {
-                nextConsecutive = 0;
-                hintPayload = null;
-                // If the last line was non-progress but this one is correct, encourage and clarify
-                if (prevStatus && (prevStatus === 'incorrect' || prevStatus === 'uncertain' || prevStatus === 'correct_not_useful')) {
-                  setCommitMsg('Correct — nice fix. The previous line was off; you can delete it or just continue.');
-                } else {
-                  setCommitMsg('Correct — keep going!');
-                }
-              } else if (validation.status === 'correct_not_useful' || validation.status === 'incorrect' || validation.status === 'uncertain') {
-                nextConsecutive = consecutiveNonProgress + 1;
-                hintPayload = computeHint({
-                  status: validation.status,
-                  consecutiveNonProgress: nextConsecutive,
-                });
-                // For non-progress, keep message concise; detailed text comes from hintPayload
-                if (validation.status === 'correct_not_useful') {
-                  setCommitMsg('Right idea — try a step that moves you forward.');
-                } else if (validation.status === 'incorrect') {
-                  setCommitMsg('Something changed incorrectly — check this line against the one above.');
-                } else {
-                  setCommitMsg('Hard to judge — rewrite a bit more clearly and try again.');
-                }
-              }
-              setConsecutiveNonProgress(nextConsecutive);
-              setLastHint(hintPayload);
-
-              let ttsInfo: TtsResponse | null = null;
-              if (voiceHintsEnabled && hintPayload && hintPayload.level >= 2) {
-                await stopHintAudio();
-                // Run TTS generation in the background so UI can finish saving immediately.
-                (async () => {
-                  try {
-                    const ctl = { cancelled: false };
-                    const promise = requestHintSpeech({
-                      attemptId,
-                      stepId: up.stepId,
-                      text: hintPayload.text,
-                      voice: 'alloy',
-                    });
-                    const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('tts_timeout')), 10000));
-                    const result = await Promise.race([promise, timeout]) as TtsResponse;
-                    if (!ctl.cancelled) {
-                      setHintAudio(result);
-                      setTtsError(null);
-                      // Persist audio path best-effort
-                      await supabase.from('attempt_steps')
-                        .update({ tts_audio_path: result.storagePath })
-                        .eq('id', up.stepId);
-                    }
-                  } catch (ttsEx: any) {
-                    console.warn('TTS generation failed:', ttsEx);
-                    setHintAudio(null);
-                    setTtsError(typeof ttsEx?.message === 'string' ? ttsEx.message : 'Failed to generate audio');
-                  }
-                })();
-              } else {
-                await stopHintAudio();
-                setHintAudio(null);
-                setTtsError(null);
-              }
-
-              // Persist validation fields
-              const { error: valErr } = await supabase
-                .from('attempt_steps')
-                .update({
-                  validation_status: validation.status,
-                  validation_reason: validation.reason,
-                  solver_metadata: validation.solverMetadata ?? null,
-                  hint_level: hintPayload ? hintPayload.level : 0,
-                  hint_text: hintPayload ? hintPayload.text : null,
-                  // tts_audio_path may be filled in by the background TTS task
-                })
-                .eq('id', up.stepId);
-              if (valErr) console.warn('Failed to persist validation fields:', valErr);
-
-              const { error: attemptStampErr } = await supabase
-                .from('attempts')
-                .update({ updated_at: new Date().toISOString() })
-                .eq('id', attemptId);
-              if (attemptStampErr) console.warn('Failed to bump attempt timestamp:', attemptStampErr);
-            }
+            nextConsecutive = consecutiveNonProgress + 1;
+            lineStatus = 'uncertain';
+            hintPayload = computeHint({ status: validation.status, consecutiveNonProgress: nextConsecutive });
           }
-        } catch (valEx) {
-          console.warn('Validation failed:', valEx);
+
+          setConsecutiveNonProgress(nextConsecutive);
+          setLastHint(hintPayload);
+          updateLineStatus(idx, lineStatus, hintPayload?.text);
+
+          // Persist validation
+          await supabase
+            .from('attempt_steps')
+            .update({
+              validation_status: validation.status,
+              validation_reason: validation.reason,
+              solver_metadata: validation.solverMetadata ?? null,
+              hint_level: hintPayload ? hintPayload.level : 0,
+              hint_text: hintPayload ? hintPayload.text : null,
+            })
+            .eq('id', up.stepId);
+        } else if (idx === 0) {
+          updateLineStatus(idx, 'correct');
         }
-      } catch (ocrErr: any) {
+      } catch (ocrErr) {
         console.warn('OCR failed:', ocrErr);
-        const m = typeof ocrErr?.message === 'string' ? ocrErr.message : String(ocrErr);
-        setOcrError(m);
+        updateLineStatus(idx, 'uncertain');
       }
-    } catch (e: any) {
+    } catch (e) {
       console.warn('Commit failed:', e);
-      const m = typeof e?.message === 'string' ? e.message : String(e);
-      setCommitMsg(`Commit failed: ${m}`);
-      setOcrError(m);
     } finally {
       setSnapshotOnlyActive(false);
       setSnapshotScale(1);
       setBusy(false);
     }
-  }, [activeStrokes.length, busy, canvasRef, commitStepLocal, consecutiveNonProgress, stopHintAudio]);
+  }, [activeStrokes.length, busy, canvasRef, commitStepLocal, consecutiveNonProgress, stepIndex, lineCount, problemBody, onSolved, addNewLine, updateLineStatus]);
 
-  return (
-    <View className="flex-1 bg-white">
-      <View className="px-4 pt-3">
-        <Card style={{ padding: 10, borderRadius: 18 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Pressable onPress={() => setToolMode(mode === 'pen' ? 'eraser' : 'pen')} style={{ backgroundColor: mode === 'eraser' ? '#fde68a' : '#e2e8f0', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, marginRight: 8 }}>
-                <Text style={{ fontWeight: '600' }}>{mode === 'eraser' ? 'Eraser' : 'Pen'}</Text>
-              </Pressable>
-              <Button title="Undo" variant="outline" onPress={undo} style={{ marginRight: 8 }} />
-              <Button
-                title="Clear"
-                variant="outline"
-                style={{ marginRight: 0 }}
-                onPress={async () => {
-                  try {
-                    clearAll();
-                    await stopHintAudio();
-                    setLastOcr(null);
-                    setLastValidation(null);
-                    setLastHint(null);
-                    setHintAudio(null);
-                    setTtsError(null);
-                    setConsecutiveNonProgress(0);
-                    setCommitMsg('Attempt cleared. Start a new attempt.');
-                    setShowOcrPanel(false);
-                    setEditOpen(false);
-                    setEditLatex('');
-                    const { data: userData } = await supabase.auth.getUser();
-                    const userId = userData.user?.id;
-                    if (userId) {
-                      const { data: att, error: attErr } = await supabase
-                        .from('attempts')
-                        .select('id')
-                        .eq('user_id', userId)
-                        .eq('status', 'in_progress')
-                        .limit(1)
-                        .maybeSingle();
-                      if (!attErr && att?.id) {
-                        await supabase
-                          .from('attempts')
-                          .update({ status: 'completed', problem_id: null })
-                          .eq('id', att.id);
-                        setAttemptMeta(null);
-                      }
-                    }
-                  } catch (e) {
-                    console.warn('Clear failed:', e);
-                  }
+  const handleClear = useCallback(async () => {
+    clearAll();
+    await stopHintAudio();
+    setLastValidation(null);
+    setLastHint(null);
+    setHintAudio(null);
+    setConsecutiveNonProgress(0);
+    setLines(Array.from({ length: INITIAL_LINES }, (_, i) => ({
+      index: i + 1,
+      status: i === 0 ? 'current' : 'empty' as LineStatus
+    })));
+    setLineCount(INITIAL_LINES);
+    setExpandedHints(new Set());
+
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+      if (userId) {
+        const { data: att } = await supabase
+          .from('attempts')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('status', 'in_progress')
+          .limit(1)
+          .maybeSingle();
+        if (att?.id) {
+          await supabase
+            .from('attempts')
+            .update({ status: 'completed', problem_id: null })
+            .eq('id', att.id);
+          setAttemptMeta(null);
+        }
+      }
+    } catch (e) {
+      console.warn('Clear failed:', e);
+    }
+  }, [clearAll, stopHintAudio]);
+
+  // Pen Settings Modal
+  const PenSettingsModal = () => (
+    <Modal
+      visible={penModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setPenModalVisible(false)}
+    >
+      <Pressable
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-end' }}
+        onPress={() => setPenModalVisible(false)}
+      >
+        <Pressable
+          style={{
+            backgroundColor: 'white',
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            padding: 24,
+            paddingBottom: 40,
+          }}
+          onPress={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#1F2937' }}>Pen Settings</Text>
+            <Pressable onPress={() => setPenModalVisible(false)}>
+              <Ionicons name="close" size={24} color="#6B7280" />
+            </Pressable>
+          </View>
+
+          {/* Tool Toggle */}
+          <View style={{ marginBottom: 20 }}>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: '#6B7280', marginBottom: 12 }}>Tool</Text>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <Pressable
+                onPress={() => setToolMode('pen')}
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  backgroundColor: mode === 'pen' ? '#0EA5E9' : '#F3F4F6',
+                  alignItems: 'center',
                 }}
-              />
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View className="px-3 py-2 rounded-lg" style={{ backgroundColor: '#f1f5f9' }}>
-                <Text style={{ fontWeight: '600', color: '#334155' }}>Step: {stepIndex}</Text>
-              </View>
-              <Button
-                title={busy || activeStrokes.length === 0 ? (busy ? 'Saving…' : 'Next line') : 'Next line'}
-                disabled={busy || activeStrokes.length === 0}
-                variant="primary"
-                size="md"
-                onPress={onCommit}
-                style={{ borderRadius: 12, backgroundColor: busy || activeStrokes.length === 0 ? '#94a3b8' : '#4f46e5', marginLeft: 8 }}
-              />
+              >
+                <Ionicons name="pencil" size={20} color={mode === 'pen' ? 'white' : '#6B7280'} />
+                <Text style={{ marginTop: 4, color: mode === 'pen' ? 'white' : '#6B7280', fontWeight: '600' }}>Pen</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setToolMode('eraser')}
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  backgroundColor: mode === 'eraser' ? '#0EA5E9' : '#F3F4F6',
+                  alignItems: 'center',
+                }}
+              >
+                <Ionicons name="trash-outline" size={20} color={mode === 'eraser' ? 'white' : '#6B7280'} />
+                <Text style={{ marginTop: 4, color: mode === 'eraser' ? 'white' : '#6B7280', fontWeight: '600' }}>Eraser</Text>
+              </Pressable>
             </View>
           </View>
-          {(lastWasProblemSet || lastValidation) && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
-              <View style={{
-                width: 10,
-                height: 10,
-                borderRadius: 5,
-                backgroundColor: lastWasProblemSet
-                  ? '#6b7280'
-                  : (lastValidation!.status === 'correct_useful' ? '#16a34a' :
-                     lastValidation!.status === 'correct_not_useful' ? '#f59e0b' :
-                     lastValidation!.status === 'incorrect' ? '#dc2626' : '#6b7280')
-              }} />
-              <Text style={{ color: '#334155' }}>{lastWasProblemSet ? 'problem set' : lastValidation!.status.replaceAll('_', ' ')}</Text>
-            </View>
-          )}
-        </Card>
-        <View style={{ height: 8 }} />
-        <Card style={{ padding: 10, borderRadius: 18 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+
+          {/* Colors */}
+          <View style={{ marginBottom: 20 }}>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: '#6B7280', marginBottom: 12 }}>Color</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               {COLORS.map((c) => (
                 <Pressable
                   key={c}
                   onPress={() => setColor(c)}
                   style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
                     backgroundColor: c,
-                    borderWidth: c === color ? 2 : 0,
-                    borderColor: '#111',
-                    marginRight: 8,
+                    borderWidth: c === color ? 3 : 0,
+                    borderColor: '#1F2937',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                   }}
-                />
-              ))}
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              {WIDTHS.map((w) => (
-                <Pressable key={w} onPress={() => setStrokeWidth(w)}
-                  style={{ width: 36, height: 36, borderWidth: w === strokeWidth ? 2 : 1, borderColor: '#cbd5e1', borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginLeft: 8 }}
                 >
-                  <View style={{ width: w, height: w, backgroundColor: '#0f172a', borderRadius: w / 2 }} />
+                  {c === color && <Ionicons name="checkmark" size={20} color="white" />}
                 </Pressable>
               ))}
             </View>
           </View>
-        </Card>
-      </View>
 
-      <GestureDetector gesture={panGesture}>
-        <Canvas
-          ref={canvasRef}
-          style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, alignSelf: 'center', backgroundColor: 'white' }}
-        >
-          <Group>
-            {!snapshotOnlyActive && guides}
-            {!snapshotOnlyActive && committedLayers.flat().map((s) => renderStroke(s))}
-            <Group transform={[{ scale: snapshotOnlyActive ? snapshotScale : 1 }]}> 
-              {activeStrokes.map((s) => renderStroke(s))}
-            </Group>
-          </Group>
-        </Canvas>
-      </GestureDetector>
-      <View className="items-center py-2" style={{ paddingBottom: 80 }}>
-        {commitMsg && (
-          <Text style={{ color: commitMsg.startsWith('Commit failed') ? '#dc2626' : '#059669' }}>{commitMsg}</Text>
-        )}
-        {debug && (
-          <View style={{ paddingTop: 6 }}>
-            {debugLog.map((l, i) => (
-              <Text key={i} style={{ fontSize: 10, color: '#64748b' }}>{l}</Text>
+          {/* Thickness */}
+          <View>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: '#6B7280', marginBottom: 12 }}>Thickness</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              {WIDTHS.map((w) => (
+                <Pressable
+                  key={w}
+                  onPress={() => setStrokeWidth(w)}
+                  style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: 12,
+                    backgroundColor: w === strokeWidth ? '#E0F2FE' : '#F3F4F6',
+                    borderWidth: w === strokeWidth ? 2 : 0,
+                    borderColor: '#0EA5E9',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <View
+                    style={{
+                      width: w * 2,
+                      height: w * 2,
+                      backgroundColor: color,
+                      borderRadius: w
+                    }}
+                  />
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
+          {/* Actions */}
+          <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
+            <Pressable
+              onPress={undo}
+              style={{
+                flex: 1,
+                paddingVertical: 14,
+                borderRadius: 12,
+                backgroundColor: '#F3F4F6',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <Ionicons name="arrow-undo" size={20} color="#6B7280" />
+              <Text style={{ color: '#6B7280', fontWeight: '600' }}>Undo</Text>
+            </Pressable>
+            <Pressable
+              onPress={handleClear}
+              style={{
+                flex: 1,
+                paddingVertical: 14,
+                borderRadius: 12,
+                backgroundColor: '#FEE2E2',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <Ionicons name="trash" size={20} color="#EF4444" />
+              <Text style={{ color: '#EF4444', fontWeight: '600' }}>Clear All</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: 'white' }}>
+      {/* Canvas Area with Line Numbers */}
+      <ScrollView
+        ref={scrollViewRef}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ minHeight: canvasHeight }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={{ flexDirection: 'row', flex: 1 }}>
+          {/* Line Numbers Column */}
+          <View style={{ width: LINE_NUMBER_WIDTH, paddingTop: LINE_HEIGHT / 2 - 12 }}>
+            {lines.map((line, i) => (
+              <View
+                key={i}
+                style={{
+                  height: LINE_HEIGHT,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <View
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 14,
+                    backgroundColor: getStatusColor(line.status),
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: line.status === 'empty' ? '#9CA3AF' : 'white',
+                      fontSize: 13,
+                      fontWeight: '700'
+                    }}
+                  >
+                    {line.index}
+                  </Text>
+                </View>
+              </View>
             ))}
           </View>
-        )}
-      </View>
 
-      {/* Persistent OCR section (anchored at bottom) */}
+          {/* Canvas */}
+          <View style={{ flex: 1 }}>
+            <GestureDetector gesture={panGesture}>
+              <Canvas
+                ref={canvasRef}
+                style={{ flex: 1, height: canvasHeight, backgroundColor: 'white' }}
+              >
+                <Group>
+                  {!snapshotOnlyActive && guides}
+                  {!snapshotOnlyActive && committedLayers.flat().map((s) => renderStroke(s))}
+                  <Group transform={[{ scale: snapshotOnlyActive ? snapshotScale : 1 }]}>
+                    {activeStrokes.map((s) => renderStroke(s))}
+                  </Group>
+                </Group>
+              </Canvas>
+            </GestureDetector>
+          </View>
+
+          {/* Hints Column */}
+          <View style={{ width: 50, paddingTop: LINE_HEIGHT / 2 - 12 }}>
+            {lines.map((line, i) => (
+              <View
+                key={i}
+                style={{
+                  height: LINE_HEIGHT,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {line.hint && (
+                  <Pressable
+                    onPress={() => toggleHintExpanded(i)}
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 14,
+                      backgroundColor: '#FEF3C7',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons
+                      name={expandedHints.has(i) ? "chevron-back" : "chevron-forward"}
+                      size={16}
+                      color="#F59E0B"
+                    />
+                  </Pressable>
+                )}
+              </View>
+            ))}
+          </View>
+        </View>
+      </ScrollView>
+
+      {/* Expanded Hint Overlay */}
+      {Array.from(expandedHints).map(lineIndex => {
+        const line = lines[lineIndex];
+        if (!line?.hint) return null;
+        return (
+          <View
+            key={lineIndex}
+            style={{
+              position: 'absolute',
+              right: 60,
+              top: (lineIndex + 1) * LINE_HEIGHT - 20,
+              backgroundColor: 'white',
+              borderRadius: 12,
+              padding: 12,
+              maxWidth: 200,
+              shadowColor: '#000',
+              shadowOpacity: 0.1,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 2 },
+              elevation: 4,
+              borderWidth: 1,
+              borderColor: '#FEF3C7',
+            }}
+          >
+            <Text style={{ fontSize: 13, color: '#1F2937', lineHeight: 18 }}>{line.hint}</Text>
+          </View>
+        );
+      })}
+
+      {/* Bottom Controls */}
       <View
         style={{
           position: 'absolute',
-          bottom: 0,
+          bottom: 30,
           left: 0,
           right: 0,
-          backgroundColor: 'white',
-          borderTopWidth: 1,
-          borderColor: '#e5e7eb',
-          paddingHorizontal: 14,
-          paddingVertical: 12,
-          gap: 10,
-          zIndex: 200,
-          elevation: 6,
+          flexDirection: 'row',
+          justifyContent: 'center',
+          alignItems: 'center',
+          paddingHorizontal: 20,
         }}
       >
-        <Text style={{ fontWeight: '700', color: '#0f172a' }}>OCR</Text>
-        {!lastOcr && !ocrError && (
-          <Text style={{ color: '#64748b' }}>No OCR result yet. Draw a step and tap “Next line”.</Text>
-        )}
-        {ocrError && !lastOcr && (
-          <Text style={{ color: '#dc2626' }}>OCR failed: {ocrError}</Text>
-        )}
-        {lastOcr && !editOpen && (
-          <>
-            <Text selectable style={{ color: '#111827' }}>LaTeX: {lastOcr.latex}</Text>
-            <Text selectable style={{ color: '#334155' }}>conf: {lastOcr.confidence.toFixed(2)}</Text>
-            {lastOcr.confidence < 0.6 && (
-              <Text style={{ color: '#b45309' }}>Hard to read—try rewriting this line for better OCR.</Text>
-            )}
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
-              <Button title="Edit" variant="outline" onPress={() => { setEditOpen(true); setEditLatex(lastOcr.latex); }} />
-            </View>
-          </>
-        )}
-        {lastOcr && editOpen && (
-          <>
-            <TextInput
-              value={editLatex}
-              onChangeText={setEditLatex}
-              placeholder="Edit LaTeX"
-              style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6 }}
-            />
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
-              <Button
-                title="Save"
-                onPress={async () => {
-                  if (!lastOcr) return;
-                  const { error } = await supabase
-                    .from('attempt_steps')
-                    .update({ ocr_latex: editLatex })
-                    .eq('id', lastOcr.stepId);
-                  if (!error) {
-                    setLastOcr({ ...lastOcr, latex: editLatex });
-                    setEditOpen(false);
-                  } else {
-                    console.warn('Failed to save override:', error);
-                  }
-                }}
-                style={{ backgroundColor: '#16a34a' }}
-                textStyle={{ color: 'white' }}
-              />
-              <Button title="Cancel" variant="outline" onPress={() => setEditOpen(false)} />
-            </View>
-          </>
-        )}
-      </View>
-
-      {lastOcr && showOcrPanel && (
-        <View
-          style={{
-            position: 'absolute',
-            top: 76,
-            right: 12,
-            maxWidth: '90%',
-            backgroundColor: 'white',
-            borderWidth: 1,
-            borderColor: '#e5e7eb',
-            borderRadius: 14,
-            padding: 12,
+        {/* Microphone Button - Center */}
+        <Pressable
+          onPress={() => {/* TODO: Voice input */}}
+          style={({ pressed }) => ({
+            width: 56,
+            height: 56,
+            borderRadius: 28,
+            backgroundColor: pressed ? '#F3F4F6' : 'white',
+            alignItems: 'center',
+            justifyContent: 'center',
             shadowColor: '#000',
             shadowOpacity: 0.1,
-            shadowRadius: 10,
+            shadowRadius: 8,
             shadowOffset: { width: 0, height: 2 },
-            elevation: 3,
-            zIndex: 100,
+            elevation: 4,
+          })}
+        >
+          <Ionicons name="mic-outline" size={28} color="#6B7280" />
+        </Pressable>
+      </View>
+
+      {/* Floating Pen Button - Bottom Right */}
+      <Pressable
+        onPress={() => setPenModalVisible(true)}
+        style={({ pressed }) => ({
+          position: 'absolute',
+          bottom: 30,
+          right: 20,
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          backgroundColor: pressed ? '#0284C7' : '#0EA5E9',
+          alignItems: 'center',
+          justifyContent: 'center',
+          shadowColor: '#0EA5E9',
+          shadowOpacity: 0.4,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: 6,
+        })}
+      >
+        <Ionicons name="pencil" size={24} color="white" />
+      </Pressable>
+
+      {/* Next Line Button - Bottom Left */}
+      <Pressable
+        onPress={onCommit}
+        disabled={busy || activeStrokes.length === 0}
+        style={({ pressed }) => ({
+          position: 'absolute',
+          bottom: 30,
+          left: 20,
+          paddingHorizontal: 20,
+          paddingVertical: 14,
+          borderRadius: 28,
+          backgroundColor: busy || activeStrokes.length === 0
+            ? '#E5E7EB'
+            : pressed ? '#059669' : '#10B981',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          shadowColor: '#10B981',
+          shadowOpacity: busy || activeStrokes.length === 0 ? 0 : 0.3,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: busy || activeStrokes.length === 0 ? 0 : 4,
+        })}
+      >
+        <Ionicons
+          name="checkmark-circle"
+          size={20}
+          color={busy || activeStrokes.length === 0 ? '#9CA3AF' : 'white'}
+        />
+        <Text
+          style={{
+            color: busy || activeStrokes.length === 0 ? '#9CA3AF' : 'white',
+            fontWeight: '700',
+            fontSize: 15,
           }}
         >
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ fontWeight: '700', color: '#0f172a' }}>OCR</Text>
-            <Button title="Hide" variant="ghost" onPress={() => setShowOcrPanel(false)} />
-          </View>
-          {!editOpen ? (
-            <>
-              <Text selectable style={{ marginTop: 4, color: '#111827' }}>LaTeX: {lastOcr.latex}{"\n"}(conf: {lastOcr.confidence.toFixed(2)})</Text>
-              {(lastWasProblemSet || lastValidation) && (
-                <View style={{ marginTop: 8 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <View style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 5,
-                      backgroundColor: lastWasProblemSet
-                        ? '#6b7280'
-                        : (lastValidation!.status === 'correct_useful' ? '#16a34a' :
-                           lastValidation!.status === 'correct_not_useful' ? '#f59e0b' :
-                           lastValidation!.status === 'incorrect' ? '#dc2626' : '#6b7280')
-                    }} />
-                    <Text style={{ color: '#334155' }}>
-                      {lastWasProblemSet ? 'problem set' : lastValidation!.status.replaceAll('_', ' ')}
-                    </Text>
-                  </View>
-                  {!lastWasProblemSet && (
-                    <>
-                      <Text style={{ color: '#475569', marginTop: 6 }}>{lastValidation!.reason}</Text>
-                      {lastHint && (
-                        <View style={{ marginTop: 6 }}>
-                          <Text style={{ fontWeight: '700', color: '#0f172a' }}>
-                            Hint (Level {lastHint.level} – {HINT_LEVEL_LABELS[lastHint.level] ?? 'Guidance'})
-                          </Text>
-                          <Text style={{ color: '#1f2937', marginTop: 4 }}>{lastHint.text}</Text>
-                          {voiceHintsEnabled && hintAudio && (
-                            <Button
-                              title={isPlayingHint ? 'Stop voice hint' : 'Play voice hint'}
-                              variant="outline"
-                              onPress={isPlayingHint ? stopHintAudio : playHintAudio}
-                              style={{ backgroundColor: '#dbeafe', borderColor: '#bfdbfe', marginTop: 8 }}
-                              textStyle={{ color: '#1d4ed8', fontWeight: '700' as any }}
-                            />
-                          )}
-                          {voiceHintsEnabled && ttsError && (
-                            <Text style={{ color: '#dc2626', marginTop: 6 }}>
-                              Audio unavailable: {ttsError}
-                            </Text>
-                          )}
-                        </View>
-                      )}
-                    </>
-                  )}
-                  {lastWasProblemSet && (
-                    <Text style={{ color: '#475569', marginTop: 4 }}>Equation captured as the problem.</Text>
-                  )}
-                </View>
-              )}
-            </>
-          ) : (
-            <TextInput
-              value={editLatex}
-              onChangeText={setEditLatex}
-              placeholder="Edit LaTeX"
-              style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, marginTop: 6 }}
-            />
-          )}
-          {lastOcr.confidence < 0.6 && !editOpen && (
-            <Text style={{ color: '#b45309', marginTop: 6 }}>
-              Hard to read—try rewriting this line for better OCR.
-            </Text>
-          )}
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-            {!editOpen ? (
-              <Button title="Edit" variant="outline" onPress={() => { setEditOpen(true); setEditLatex(lastOcr.latex); }} />
-            ) : (
-              <>
-                <Button
-                  title="Save"
-                  onPress={async () => {
-                    const { error } = await supabase
-                      .from('attempt_steps')
-                      .update({ ocr_latex: editLatex })
-                      .eq('id', lastOcr.stepId);
-                    if (!error) {
-                      setLastOcr({ ...lastOcr, latex: editLatex });
-                      setEditOpen(false);
-                    } else {
-                      console.warn('Failed to save override:', error);
-                    }
-                  }}
-                  style={{ backgroundColor: '#16a34a' }}
-                  textStyle={{ color: 'white' }}
-                />
-                <Button title="Cancel" variant="outline" onPress={() => setEditOpen(false)} />
-              </>
-            )}
-          </View>
-        </View>
-      )}
+          {busy ? 'Checking...' : 'Done'}
+        </Text>
+      </Pressable>
+
+      <PenSettingsModal />
     </View>
   );
 }
-
-
