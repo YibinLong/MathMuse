@@ -63,7 +63,7 @@ export default function AuthScreen({ onAuthSuccess }: { onAuthSuccess: () => voi
 
   return (
     <View className="flex-1" style={{ backgroundColor: '#f8fafc', paddingHorizontal: 20, justifyContent: 'center' }}>
-      <View style={{ alignItems: 'center', marginBottom: 16 }}>
+      <View style={{ alignItems: 'center', marginBottom: 16, paddingTop: 40 }}>
         <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#4f46e5', alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: 'white', fontWeight: '800', fontSize: 22 }}>μ</Text>
         </View>
@@ -111,12 +111,6 @@ export default function AuthScreen({ onAuthSuccess }: { onAuthSuccess: () => voi
           </Text>
         </Pressable>
       </Card>
-
-      <View style={{ marginTop: 12, padding: 12, backgroundColor: '#fffbeb', borderRadius: 12 }}>
-        <Text style={{ fontSize: 12, color: '#374151', textAlign: 'center' }}>
-          💡 For testing: Use any email and password (min 6 chars)
-        </Text>
-      </View>
     </View>
   );
 }
