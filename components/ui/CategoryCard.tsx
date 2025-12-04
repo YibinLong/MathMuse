@@ -1,11 +1,18 @@
 import React from 'react';
-import { View, Text, Pressable, ViewStyle } from 'react-native';
+import { View, Text, Pressable, ViewStyle, Dimensions } from 'react-native';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+// Card width: fit 2 cards with padding (20px sides + 16px gap between)
+const CARD_WIDTH = (SCREEN_WIDTH - 40 - 16) / 2;
+// Card height: fit 2 rows with gap
+const CARD_HEIGHT = (SCREEN_HEIGHT - 280) / 2 - 8; // Account for header, title, and gap
 
 const COLORS = {
   cardBg: '#FFFFFF',
   text: '#2D3047',
   textMuted: '#6B7280',
   border: '#E8E4DF',
+  progressBg: '#E5E7EB',
 };
 
 export type CategoryCardProps = {
@@ -28,147 +35,106 @@ export function CategoryCard({
   style,
 }: CategoryCardProps) {
   const progress = totalCount > 0 ? completedCount / totalCount : 0;
-  const remainingCount = totalCount - completedCount;
 
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [
         {
+          width: CARD_WIDTH,
+          height: CARD_HEIGHT,
+          marginBottom: 12,
+          borderRadius: 20,
           backgroundColor: COLORS.cardBg,
-          borderRadius: 28,
-          padding: 20,
-          width: 220,
-          height: 240,
-          marginRight: 16,
-          marginBottom: 16,
           borderWidth: 1,
           borderColor: COLORS.border,
+          overflow: 'hidden',
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: pressed ? 0.15 : 0.08,
+          shadowOpacity: pressed ? 0.12 : 0.06,
           shadowRadius: 8,
-          elevation: pressed ? 4 : 3,
+          elevation: pressed ? 4 : 2,
           transform: [{ scale: pressed ? 0.98 : 1 }],
         },
         style,
       ]}
     >
-      {/* Category Name */}
-      <Text
+      {/* Subtle color accent at top */}
+      <View
         style={{
-          fontFamily: 'PlayfairDisplay_700Bold',
-          fontSize: 22,
-          color: COLORS.text,
-          marginBottom: 8,
+          height: 5,
+          backgroundColor: color,
         }}
-        numberOfLines={2}
-      >
-        {name}
-      </Text>
+      />
 
-      {/* Description */}
-      <Text
+      <View
         style={{
-          fontFamily: 'Nunito_400Regular',
-          fontSize: 14,
-          color: COLORS.textMuted,
-          lineHeight: 20,
-          marginBottom: 16,
+          flex: 1,
+          padding: 16,
+          justifyContent: 'space-between',
         }}
-        numberOfLines={2}
       >
-        {description}
-      </Text>
+        {/* Top Section - Name and Description */}
+        <View>
+          <Text
+            style={{
+              fontFamily: 'PlayfairDisplay_700Bold',
+              fontSize: 18,
+              color: COLORS.text,
+              marginBottom: 6,
+            }}
+            numberOfLines={2}
+          >
+            {name}
+          </Text>
+          <Text
+            style={{
+              fontFamily: 'Nunito_400Regular',
+              fontSize: 13,
+              color: COLORS.textMuted,
+              lineHeight: 18,
+            }}
+            numberOfLines={3}
+          >
+            {description}
+          </Text>
+        </View>
 
-      {/* Progress Section */}
-      <View style={{ marginTop: 'auto' }}>
-        {/* Progress Pills */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-          {/* Completed pill */}
+        {/* Bottom Section - Progress */}
+        <View>
+          {/* Progress bar background */}
           <View
             style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              backgroundColor: color + '20',
-              paddingHorizontal: 12,
-              paddingVertical: 5,
-              borderRadius: 14,
+              height: 6,
+              backgroundColor: COLORS.progressBg,
+              borderRadius: 3,
+              overflow: 'hidden',
             }}
           >
+            {/* Progress bar fill */}
             <View
               style={{
-                width: 7,
-                height: 7,
-                borderRadius: 4,
+                height: '100%',
+                width: `${progress * 100}%`,
                 backgroundColor: color,
-                marginRight: 6,
+                borderRadius: 3,
               }}
             />
-            <Text
-              style={{
-                fontFamily: 'Nunito_600SemiBold',
-                fontSize: 13,
-                color: COLORS.text,
-              }}
-            >
-              {completedCount} sets
-            </Text>
           </View>
 
-          {/* Remaining pill */}
-          <View
+          {/* Progress text */}
+          <Text
             style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              backgroundColor: '#FEF3C7',
-              paddingHorizontal: 12,
-              paddingVertical: 5,
-              borderRadius: 14,
+              fontFamily: 'Nunito_400Regular',
+              fontSize: 11,
+              color: COLORS.textMuted,
+              marginTop: 8,
+              textAlign: 'center',
             }}
           >
-            <Text
-              style={{
-                fontFamily: 'Nunito_600SemiBold',
-                fontSize: 13,
-                color: '#B45309',
-              }}
-            >
-              {remainingCount} left
-            </Text>
-          </View>
+            {completedCount} of {totalCount} complete
+          </Text>
         </View>
-
-        {/* Progress bar */}
-        <View
-          style={{
-            height: 6,
-            backgroundColor: '#E5E7EB',
-            borderRadius: 3,
-            overflow: 'hidden',
-          }}
-        >
-          <View
-            style={{
-              height: '100%',
-              width: `${progress * 100}%`,
-              backgroundColor: color,
-              borderRadius: 3,
-            }}
-          />
-        </View>
-
-        {/* Progress text */}
-        <Text
-          style={{
-            fontFamily: 'Nunito_400Regular',
-            fontSize: 12,
-            color: COLORS.textMuted,
-            marginTop: 8,
-          }}
-        >
-          {completedCount} of {totalCount} complete
-        </Text>
       </View>
     </Pressable>
   );
