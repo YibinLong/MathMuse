@@ -8,7 +8,7 @@ import { useProgressStore } from '../stores/progressStore';
 import { Ionicons } from '@expo/vector-icons';
 
 const COLORS = {
-  background: '#FFFFFF',
+  background: '#FDF8F3',
   primary: '#0EA5E9',
   text: '#1F2937',
   textMuted: '#6B7280',
@@ -28,29 +28,26 @@ export default function ProblemScreen({ navigation, route }: ProblemScreenProps)
   };
 
   const handleComplete = async () => {
-    if (!userId) return;
+    if (!userId || isCompleted) return;
     try {
       await completeLevel(userId, categoryId, levelNumber, problemId);
       setIsCompleted(true);
-      navigation.goBack();
+      // User stays on screen - can leave when ready via success overlay
     } catch (error) {
       console.error('Failed to complete level:', error);
     }
   };
 
-  // Parse problem body for multi-line equations (for display in header)
-  const equationLines = problemBody.split('\n').filter(line => line.trim());
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background }} edges={['top']}>
-      {/* Header - Clean Chiron-style */}
+      {/* Header - Minimal */}
       <View
         style={{
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
           paddingHorizontal: 16,
-          paddingVertical: 12,
+          paddingVertical: 8,
         }}
       >
         {/* Back Button */}
@@ -68,61 +65,82 @@ export default function ProblemScreen({ navigation, route }: ProblemScreenProps)
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </Pressable>
 
-        {/* Equation Display - Centered */}
+        {/* Problem Title - Centered */}
         <View style={{ flex: 1, alignItems: 'center' }}>
-          {equationLines.map((line, index) => (
-            <Text
-              key={index}
-              style={{
-                fontFamily: 'Nunito_600SemiBold',
-                fontSize: 16,
-                color: COLORS.text,
-                textAlign: 'center',
-              }}
-            >
-              {line}
-            </Text>
-          ))}
+          <Text
+            style={{
+              fontFamily: 'Nunito_400Regular',
+              fontSize: 14,
+              color: COLORS.textMuted,
+              textAlign: 'center',
+            }}
+          >
+            {problemTitle}
+          </Text>
         </View>
 
-        {/* Settings Gear */}
-        <Pressable
-          onPress={() => {/* TODO: Settings modal */}}
-          style={({ pressed }) => ({
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            backgroundColor: pressed ? '#F3F4F6' : 'transparent',
-            alignItems: 'center',
-            justifyContent: 'center',
-          })}
-        >
-          <Ionicons name="settings-outline" size={22} color={COLORS.text} />
-        </Pressable>
-      </View>
-
-      {/* Question Prompt */}
-      <View style={{ paddingHorizontal: 20, paddingBottom: 12 }}>
-        <Text
-          style={{
-            fontFamily: 'Nunito_400Regular',
-            fontSize: 15,
-            color: COLORS.textMuted,
-            textAlign: 'center',
-            fontStyle: 'italic',
-          }}
-        >
-          {problemTitle}
-        </Text>
+        {/* Spacer for symmetry */}
+        <View style={{ width: 40 }} />
       </View>
 
       {/* Handwriting Canvas */}
       <View style={{ flex: 1 }}>
         <HandwritingCanvas
           problemBody={problemBody}
-          onSolved={() => setIsCompleted(true)}
+          onSolved={handleComplete}
         />
       </View>
+
+      {/* Success Overlay - Shows when problem is solved */}
+      {isCompleted && (
+        <View
+          style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            paddingHorizontal: 20,
+            paddingVertical: 20,
+            paddingBottom: 40,
+            backgroundColor: '#DCFCE7',
+            borderTopWidth: 1,
+            borderTopColor: '#86EFAC',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -4 },
+            shadowOpacity: 0.1,
+            shadowRadius: 8,
+            elevation: 8,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+            <Ionicons name="checkmark-circle" size={28} color="#16A34A" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: '#166534' }}>
+                Problem Solved!
+              </Text>
+              <Text style={{ fontSize: 13, color: '#15803D' }}>
+                Great work! Ready for the next challenge?
+              </Text>
+            </View>
+          </View>
+          <Pressable
+            onPress={handleBack}
+            style={{
+              paddingHorizontal: 20,
+              paddingVertical: 12,
+              backgroundColor: '#16A34A',
+              borderRadius: 24,
+            }}
+          >
+            <Text style={{ color: 'white', fontWeight: '700', fontSize: 15 }}>
+              Continue
+            </Text>
+          </Pressable>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
