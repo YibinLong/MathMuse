@@ -1,16 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Pressable, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { supabase } from '../lib/supabase';
-import {
-  useFonts,
-  Nunito_400Regular,
-  Nunito_600SemiBold,
-  Nunito_700Bold,
-  Nunito_800ExtraBold,
-} from '@expo-google-fonts/nunito';
-import {
-  PlayfairDisplay_700Bold_Italic,
-} from '@expo-google-fonts/playfair-display';
 
 // Warm, kid-friendly color palette
 const COLORS = {
@@ -30,14 +20,6 @@ export default function AuthScreen({ onAuthSuccess }: { onAuthSuccess: () => voi
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
-
-  const [fontsLoaded] = useFonts({
-    Nunito_400Regular,
-    Nunito_600SemiBold,
-    Nunito_700Bold,
-    Nunito_800ExtraBold,
-    PlayfairDisplay_700Bold_Italic,
-  });
 
   async function handleAuth() {
     if (!email || !password) {
@@ -64,15 +46,6 @@ export default function AuthScreen({ onAuthSuccess }: { onAuthSuccess: () => voi
     }
   }
 
-  // Show simple loading state while fonts load
-  if (!fontsLoaded) {
-    return (
-      <View style={{ flex: 1, backgroundColor: COLORS.background, justifyContent: 'center', alignItems: 'center' }}>
-        <Text style={{ color: COLORS.textMuted }}>Loading...</Text>
-      </View>
-    );
-  }
-
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -85,10 +58,10 @@ export default function AuthScreen({ onAuthSuccess }: { onAuthSuccess: () => voi
         {/* Logo & Title */}
         <View style={{ alignItems: 'center', marginBottom: 48 }}>
           <Text style={{
-            fontFamily: 'PlayfairDisplay_700Bold_Italic',
-            fontSize: 48,
+            fontFamily: 'PlayfairDisplay_700Bold',
+            fontSize: 44,
             color: COLORS.primary,
-            letterSpacing: -1,
+            letterSpacing: -0.5,
           }}>
             MathMuse
           </Text>
@@ -211,18 +184,6 @@ export default function AuthScreen({ onAuthSuccess }: { onAuthSuccess: () => voi
               {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
             </Text>
           </Pressable>
-        </View>
-
-        {/* Fun footer for kids */}
-        <View style={{ marginTop: 48, alignItems: 'center' }}>
-          <Text style={{
-            fontFamily: 'Nunito_400Regular',
-            fontSize: 14,
-            color: COLORS.textMuted,
-            textAlign: 'center',
-          }}>
-            Write math, solve problems, have fun!
-          </Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
