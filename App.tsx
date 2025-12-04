@@ -1,32 +1,44 @@
 import { StatusBar } from 'expo-status-bar';
-import { View, Text, ActivityIndicator, Pressable, Alert } from 'react-native';
-import HandwritingCanvas from './components/HandwritingCanvas';
+import { View, Text, ActivityIndicator } from 'react-native';
 import AuthScreen from './screens/AuthScreen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { NavigationContainer } from '@react-navigation/native';
 import { supabase } from './lib/supabase';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useSessionStore } from './stores/sessionStore';
-import { Button } from './components/ui/Button';
+import RootNavigator from './navigation/RootNavigator';
+import {
+  useFonts,
+  Nunito_400Regular,
+  Nunito_600SemiBold,
+  Nunito_700Bold,
+  Nunito_800ExtraBold,
+} from '@expo-google-fonts/nunito';
+import { PlayfairDisplay_700Bold } from '@expo-google-fonts/playfair-display';
 
 /**
  * Main App Component
- * 
- * WHY: We need to check if the user is authenticated before showing the canvas
- * 
+ *
  * FLOW:
- * 1. App starts → Check if user is logged in (session exists)
- * 2. If logged in → Show HandwritingCanvas
+ * 1. App starts → Load fonts → Check if user is logged in
+ * 2. If logged in → Show Learning Path (via RootNavigator)
  * 3. If NOT logged in → Show AuthScreen
  * 4. Listen for auth changes (login/logout) and update UI accordingly
  */
 export default function App() {
-  // Select each piece individually to avoid returning a new object each render
   const session = useSessionStore((s) => s.session);
   const initialized = useSessionStore((s) => s.initialized);
   const setSession = useSessionStore((s) => s.setSession);
-  const signOutFn = useSessionStore((s) => s.signOut);
   const initializeFn = useSessionStore((s) => s.initialize);
-  const [signingOut, setSigningOut] = useState(false);
+
+  // Load fonts at the app level so all screens can use them
+  const [fontsLoaded] = useFonts({
+    Nunito_400Regular,
+    Nunito_600SemiBold,
+    Nunito_700Bold,
+    Nunito_800ExtraBold,
+    PlayfairDisplay_700Bold,
+  });
 
   useEffect(() => {
     // Run once on mount
@@ -34,7 +46,9 @@ export default function App() {
       console.warn('Failed to initialize session:', err);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
     });
 
@@ -43,84 +57,42 @@ export default function App() {
     };
   }, []); // intentionally empty
 
-  async function handleSignOut() {
-    try {
-      setSigningOut(true);
-      await signOutFn();
-    } catch (error: any) {
-      Alert.alert('Sign out failed', error?.message ?? 'Please try again.');
-    } finally {
-      setSigningOut(false);
-    }
-  }
-
-  // Show loading spinner while checking auth
-  if (!initialized) {
+  // Show loading spinner while fonts load or checking auth
+  if (!fontsLoaded || !initialized) {
     return (
-      <View className="flex-1 bg-white items-center justify-center">
-        <ActivityIndicator size="large" color="#2563eb" />
-        <Text className="mt-4 text-gray-600">Loading...</Text>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: '#FDF8F3',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <ActivityIndicator size="large" color="#5B4CDB" />
+        <Text style={{ marginTop: 16, color: '#6B7280' }}>Loading...</Text>
       </View>
     );
   }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      {session ? (
-        // User is logged in → Show main app
-        <View style={{ flex: 1, backgroundColor: 'white', paddingTop: 40 }}>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              paddingHorizontal: 16,
-              paddingVertical: 10,
-              borderBottomWidth: 1,
-              borderColor: '#e5e7eb',
-              backgroundColor: 'white',
+      <NavigationContainer>
+        {session ? (
+          // User is logged in → Show main app navigation
+          <>
+            <RootNavigator />
+            <StatusBar style="auto" />
+          </>
+        ) : (
+          // User is NOT logged in → Show auth screen
+          <AuthScreen
+            onAuthSuccess={() => {
+              // onAuthSuccess is called after successful login
+              // The session will auto-update via onAuthStateChange listener
             }}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 12,
-                  backgroundColor: '#4f46e5',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginRight: 10,
-                }}
-              >
-                <Text style={{ color: 'white', fontWeight: '800', fontSize: 18 }}>μ</Text>
-              </View>
-              <View>
-                <Text style={{ color: '#111827', fontSize: 18, fontWeight: '800' }}>MathMuse</Text>
-                {session?.user?.email && (
-                  <Text style={{ color: '#6b7280', fontSize: 12 }}>{session.user.email}</Text>
-                )}
-              </View>
-            </View>
-            <Button
-              title={signingOut ? 'Signing out…' : 'Sign out'}
-              variant="outline"
-              size="md"
-              disabled={signingOut}
-              onPress={handleSignOut}
-              style={{ borderRadius: 12 }}
-            />
-          </View>
-          <HandwritingCanvas />
-          <StatusBar style="auto" />
-        </View>
-      ) : (
-        // User is NOT logged in → Show auth screen
-        <AuthScreen onAuthSuccess={() => {
-          // onAuthSuccess is called after successful login
-          // The session will auto-update via onAuthStateChange listener
-        }} />
-      )}
+          />
+        )}
+      </NavigationContainer>
     </GestureHandlerRootView>
   );
 }
