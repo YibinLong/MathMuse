@@ -374,8 +374,8 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
         addNewLine();
       }
 
-      // Update current line status
-      updateLineStatus(idx, 'current');
+      // Update current line status (idx + 1 because lines[0] is the problem line)
+      updateLineStatus(idx + 1, 'current');
 
       const { userId, attemptId } = await ensureAttemptId();
       const up = await uploadStepPng({ userId, attemptId, stepIndex: idx, bytes, vectorJson });
@@ -468,7 +468,7 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
 
           setConsecutiveNonProgress(nextConsecutive);
           setLastHint(hintPayload);
-          updateLineStatus(idx, lineStatus, hintPayload?.text);
+          updateLineStatus(idx + 1, lineStatus, hintPayload?.text);
 
           // Persist validation
           await supabase
@@ -484,7 +484,7 @@ export default function HandwritingCanvas({ problemBody, onSolved }: Handwriting
         }
       } catch (ocrErr) {
         console.warn('OCR failed:', ocrErr);
-        updateLineStatus(idx, 'uncertain');
+        updateLineStatus(idx + 1, 'uncertain');
       }
     } catch (e) {
       console.warn('Commit failed:', e);

@@ -1,5 +1,14 @@
 import React from 'react';
-import { View, Text, Pressable, ViewStyle, Dimensions } from 'react-native';
+import { View, Text, Pressable, ViewStyle, Dimensions, Image, ImageSourcePropType } from 'react-native';
+
+// Map category names to their images
+const CATEGORY_IMAGES: Record<string, ImageSourcePropType> = {
+  'Basic Equations': require('../../assets/Basic_Equations.png'),
+  'Linear Equations': require('../../assets/Linear_Equations.png'),
+  'Quadratic Equations': require('../../assets/Quadratic.png'),
+  'Systems of Equations': require('../../assets/System_of_Equations.png'),
+  'Inequalities': require('../../assets/Inequality.png'),
+};
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 // Card width: fit 2 cards with padding (20px sides + 16px gap between)
@@ -94,10 +103,24 @@ export function CategoryCard({
               color: COLORS.textMuted,
               lineHeight: 18,
             }}
-            numberOfLines={3}
+            numberOfLines={2}
           >
             {description}
           </Text>
+        </View>
+
+        {/* Category Image */}
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          {CATEGORY_IMAGES[name] && (
+            <Image
+              source={CATEGORY_IMAGES[name]}
+              style={{
+                width: CARD_WIDTH * 0.6,
+                height: CARD_WIDTH * 0.6,
+              }}
+              resizeMode="contain"
+            />
+          )}
         </View>
 
         {/* Bottom Section - Progress */}
