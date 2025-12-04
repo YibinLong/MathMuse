@@ -20,7 +20,7 @@ The OCR wasn't working because:
 ### **2. Updated `lib/supabase.ts`**
 - **WHY**: Now properly reads Supabase credentials from the config
 - **WHAT CHANGED**: Uses `Constants.expoConfig.extra` to access env vars
-- **ADDED**: Clear error messages if credentials are missing
+- **ADDED**: Clear error messages if credentials are Rmissing
 
 ### **3. Updated `components/HandwritingCanvas.tsx`**
 - **WHY**: Debug mode now works properly
@@ -261,4 +261,5 @@ The `.env` file is already in `.gitignore` - it won't be committed to Git.
 ---
 
 Good luck! 🚀 If you follow these steps carefully, your OCR should work perfectly.
+
 
