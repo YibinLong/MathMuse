@@ -36,12 +36,12 @@ export function CategoryCard({
       style={({ pressed }) => [
         {
           backgroundColor: COLORS.cardBg,
-          borderRadius: 24,
-          padding: 16,
-          width: 180,
-          height: 200,
-          marginRight: 12,
-          marginBottom: 12,
+          borderRadius: 28,
+          padding: 20,
+          width: 220,
+          height: 240,
+          marginRight: 16,
+          marginBottom: 16,
           borderWidth: 1,
           borderColor: COLORS.border,
           shadowColor: '#000',
@@ -58,9 +58,9 @@ export function CategoryCard({
       <Text
         style={{
           fontFamily: 'PlayfairDisplay_700Bold',
-          fontSize: 18,
+          fontSize: 22,
           color: COLORS.text,
-          marginBottom: 6,
+          marginBottom: 8,
         }}
         numberOfLines={2}
       >
@@ -71,10 +71,10 @@ export function CategoryCard({
       <Text
         style={{
           fontFamily: 'Nunito_400Regular',
-          fontSize: 12,
+          fontSize: 14,
           color: COLORS.textMuted,
-          lineHeight: 16,
-          marginBottom: 12,
+          lineHeight: 20,
+          marginBottom: 16,
         }}
         numberOfLines={2}
       >
@@ -83,32 +83,32 @@ export function CategoryCard({
 
       {/* Progress Section */}
       <View style={{ marginTop: 'auto' }}>
-        {/* Progress Pills - stacked vertically for compact layout */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+        {/* Progress Pills */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
           {/* Completed pill */}
           <View
             style={{
               flexDirection: 'row',
               alignItems: 'center',
               backgroundColor: color + '20',
-              paddingHorizontal: 10,
-              paddingVertical: 4,
-              borderRadius: 12,
+              paddingHorizontal: 12,
+              paddingVertical: 5,
+              borderRadius: 14,
             }}
           >
             <View
               style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
+                width: 7,
+                height: 7,
+                borderRadius: 4,
                 backgroundColor: color,
-                marginRight: 5,
+                marginRight: 6,
               }}
             />
             <Text
               style={{
                 fontFamily: 'Nunito_600SemiBold',
-                fontSize: 11,
+                fontSize: 13,
                 color: COLORS.text,
               }}
             >
@@ -122,15 +122,15 @@ export function CategoryCard({
               flexDirection: 'row',
               alignItems: 'center',
               backgroundColor: '#FEF3C7',
-              paddingHorizontal: 10,
-              paddingVertical: 4,
-              borderRadius: 12,
+              paddingHorizontal: 12,
+              paddingVertical: 5,
+              borderRadius: 14,
             }}
           >
             <Text
               style={{
                 fontFamily: 'Nunito_600SemiBold',
-                fontSize: 11,
+                fontSize: 13,
                 color: '#B45309',
               }}
             >
@@ -142,7 +142,7 @@ export function CategoryCard({
         {/* Progress bar */}
         <View
           style={{
-            height: 5,
+            height: 6,
             backgroundColor: '#E5E7EB',
             borderRadius: 3,
             overflow: 'hidden',
@@ -162,9 +162,9 @@ export function CategoryCard({
         <Text
           style={{
             fontFamily: 'Nunito_400Regular',
-            fontSize: 11,
+            fontSize: 12,
             color: COLORS.textMuted,
-            marginTop: 6,
+            marginTop: 8,
           }}
         >
           {completedCount} of {totalCount} complete

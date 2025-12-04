@@ -48,9 +48,9 @@ export function LevelButton({ levelNumber, status, onPress, style }: LevelButton
       disabled={isLocked}
       style={({ pressed }) => [
         {
-          width: 80,
-          height: 80,
-          borderRadius: 16,
+          width: 100,
+          height: 100,
+          borderRadius: 24,
           backgroundColor: getBackgroundColor(),
           borderWidth: isLocked ? 0 : 3,
           borderColor: getBorderColor(),
@@ -58,9 +58,9 @@ export function LevelButton({ levelNumber, status, onPress, style }: LevelButton
           justifyContent: 'center',
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: isLocked ? 0 : 0.1,
-          shadowRadius: 4,
-          elevation: isLocked ? 0 : 2,
+          shadowOpacity: isLocked ? 0 : 0.12,
+          shadowRadius: 6,
+          elevation: isLocked ? 0 : 3,
           opacity: pressed && !isLocked ? 0.8 : 1,
           transform: [{ scale: pressed && !isLocked ? 0.95 : 1 }],
         },
@@ -70,8 +70,7 @@ export function LevelButton({ levelNumber, status, onPress, style }: LevelButton
       {isLocked ? (
         // Lock icon
         <View style={{ alignItems: 'center' }}>
-          <Text style={{ fontSize: 28, color: COLORS.lockedText }}>
-            {/* Simple lock character */}
+          <Text style={{ fontSize: 36, color: COLORS.lockedText }}>
             🔒
           </Text>
         </View>
@@ -81,20 +80,20 @@ export function LevelButton({ levelNumber, status, onPress, style }: LevelButton
           <Text
             style={{
               fontFamily: 'Nunito_800ExtraBold',
-              fontSize: 28,
+              fontSize: 36,
               color: COLORS.white,
             }}
           >
             {levelNumber}
           </Text>
-          <Text style={{ fontSize: 14, marginTop: -2 }}>✓</Text>
+          <Text style={{ fontSize: 18, marginTop: -4 }}>✓</Text>
         </View>
       ) : (
         // Level number for unlocked
         <Text
           style={{
             fontFamily: 'Nunito_800ExtraBold',
-            fontSize: 32,
+            fontSize: 40,
             color: getTextColor(),
           }}
         >

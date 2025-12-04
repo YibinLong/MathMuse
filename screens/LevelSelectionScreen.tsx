@@ -107,22 +107,23 @@ export default function LevelSelectionScreen({ navigation, route }: LevelSelecti
       <FlatList
         data={levels}
         keyExtractor={(item) => String(item.levelNumber)}
-        numColumns={2}
+        numColumns={5}
         contentContainerStyle={{
-          paddingHorizontal: 40,
-          paddingTop: 32,
+          paddingHorizontal: 24,
+          paddingTop: 24,
           paddingBottom: 60,
+          flexGrow: 1,
         }}
         columnWrapperStyle={{
-          justifyContent: 'space-between',
-          marginBottom: 20,
+          justifyContent: 'center',
+          gap: 16,
+          marginBottom: 16,
         }}
         renderItem={({ item }) => (
           <LevelButton
             levelNumber={item.levelNumber}
             status={item.status}
             onPress={() => handleLevelPress(item)}
-            style={{ marginHorizontal: 20 }}
           />
         )}
         ListEmptyComponent={
@@ -207,54 +208,6 @@ export default function LevelSelectionScreen({ navigation, route }: LevelSelecti
             backgroundColor: categoryColor,
           }}
         />
-      </View>
-
-      {/* Difficulty Legend */}
-      <View
-        style={{
-          flexDirection: 'row',
-          justifyContent: 'center',
-          alignItems: 'center',
-          paddingHorizontal: 20,
-          paddingVertical: 12,
-        }}
-      >
-        <Text
-          style={{
-            fontFamily: 'Nunito_400Regular',
-            fontSize: 13,
-            color: COLORS.textMuted,
-          }}
-        >
-          Easy
-        </Text>
-        <View
-          style={{
-            flex: 1,
-            height: 2,
-            marginHorizontal: 12,
-            borderRadius: 1,
-            backgroundColor: '#E5E7EB',
-          }}
-        >
-          <View
-            style={{
-              width: '100%',
-              height: '100%',
-              borderRadius: 1,
-              backgroundColor: categoryColor,
-            }}
-          />
-        </View>
-        <Text
-          style={{
-            fontFamily: 'Nunito_400Regular',
-            fontSize: 13,
-            color: COLORS.textMuted,
-          }}
-        >
-          Hard
-        </Text>
       </View>
 
       {/* Level Grid */}
