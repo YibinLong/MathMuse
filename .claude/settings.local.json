@@ -10,7 +10,8 @@
       "mcp__web-search-prime__webSearchPrime",
       "Bash(npx expo start --help:*)",
       "Bash(eas build --help:*)",
-      "Bash(eas build:*)"
+      "Bash(eas build:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []
