@@ -62,13 +62,13 @@ export default function AuthScreen({ onAuthSuccess }: { onAuthSuccess: () => voi
   }
 
   return (
-    <View className="flex-1" style={{ backgroundColor: '#f8fafc', paddingHorizontal: 20, justifyContent: 'center' }}>
-      <View style={{ alignItems: 'center', marginBottom: 16, paddingTop: 40 }}>
+    <View className="flex-1" style={{ flex: 1, backgroundColor: '#f8fafc', paddingHorizontal: 20, justifyContent: 'center' }}>
+      <View style={{ alignItems: 'center', marginBottom: 32 }}>
         <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#4f46e5', alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: 'white', fontWeight: '800', fontSize: 22 }}>μ</Text>
         </View>
         <Text style={{ marginTop: 10, fontSize: 24, fontWeight: '800', color: '#111827' }}>MathMuse</Text>
-        <Text style={{ marginTop: 6, color: '#6b7280' }}>{isSignUp ? 'Create an account' : 'Sign in to continue'}</Text>
+        <Text style={{ marginTop: 8, color: '#6b7280', fontSize: 16 }}>Where handwriting meets math</Text>
       </View>
 
       <Card style={{ borderRadius: 18, padding: 16 }}>
