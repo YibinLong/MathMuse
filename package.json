@@ -10,12 +10,15 @@
     "kill:ports": "bash scripts/kill-dev.sh"
   },
   "dependencies": {
+    "@expo-google-fonts/nunito": "^0.4.2",
+    "@expo-google-fonts/playfair-display": "^0.4.2",
     "@shopify/react-native-skia": "2.2.12",
     "@supabase/supabase-js": "^2.79.0",
     "expo": "54.0.23",
     "expo-av": "~16.0.7",
     "expo-constants": "~18.0.0",
     "expo-file-system": "~19.0.17",
+    "expo-font": "~14.0.9",
     "expo-status-bar": "~3.0.8",
     "nativewind": "^4.2.1",
     "openai": "^6.8.1",

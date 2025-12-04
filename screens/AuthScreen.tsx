@@ -1,117 +1,230 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, Alert } from 'react-native';
+import { View, Text, TextInput, Pressable, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { supabase } from '../lib/supabase';
-import { Card } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
+import {
+  useFonts,
+  Nunito_400Regular,
+  Nunito_600SemiBold,
+  Nunito_700Bold,
+  Nunito_800ExtraBold,
+} from '@expo-google-fonts/nunito';
+import {
+  PlayfairDisplay_700Bold_Italic,
+} from '@expo-google-fonts/playfair-display';
 
-/**
- * Simple authentication screen for email/password login
- * 
- * WHY: Users need to be authenticated to save their work to Supabase
- * This screen handles:
- * 1. Login with email/password
- * 2. Sign up for new users
- * 3. Basic error handling
- */
+// Warm, kid-friendly color palette
+const COLORS = {
+  background: '#FDF8F3',      // Warm cream
+  primary: '#5B4CDB',         // Friendly purple
+  primaryDark: '#4338CA',     // Darker purple for pressed states
+  text: '#2D3047',            // Dark navy for readability
+  textMuted: '#6B7280',       // Muted gray
+  inputBg: '#FFFFFF',
+  inputBorder: '#E8E4DF',
+  cardBg: '#FFFFFF',
+  accent: '#F59E0B',          // Warm amber accent
+};
+
 export default function AuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
 
-  /**
-   * Handle login or sign up
-   * 
-   * WHY: We use Supabase's auth.signInWithPassword() for login
-   * and auth.signUp() for new account creation.
-   * 
-   * After successful auth, we call onAuthSuccess() which will
-   * show the main app (HandwritingCanvas).
-   */
+  const [fontsLoaded] = useFonts({
+    Nunito_400Regular,
+    Nunito_600SemiBold,
+    Nunito_700Bold,
+    Nunito_800ExtraBold,
+    PlayfairDisplay_700Bold_Italic,
+  });
+
   async function handleAuth() {
     if (!email || !password) {
-      Alert.alert('Error', 'Please enter email and password');
+      Alert.alert('Oops!', 'Please enter your email and password');
       return;
     }
 
     setLoading(true);
     try {
       if (isSignUp) {
-        // Create new account
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
+        const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        Alert.alert('Success', 'Account created! Please log in.');
+        Alert.alert('Welcome!', 'Account created! Please check your email, then sign in.');
         setIsSignUp(false);
       } else {
-        // Login to existing account
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         onAuthSuccess();
       }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Authentication failed');
+      Alert.alert('Oops!', error.message || 'Something went wrong');
     } finally {
       setLoading(false);
     }
   }
 
-  return (
-    <View className="flex-1" style={{ flex: 1, backgroundColor: '#f8fafc', paddingHorizontal: 20, justifyContent: 'center' }}>
-      <View style={{ alignItems: 'center', marginBottom: 32 }}>
-        <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#4f46e5', alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: 'white', fontWeight: '800', fontSize: 22 }}>μ</Text>
-        </View>
-        <Text style={{ marginTop: 10, fontSize: 24, fontWeight: '800', color: '#111827' }}>MathMuse</Text>
-        <Text style={{ marginTop: 8, color: '#6b7280', fontSize: 16 }}>Where handwriting meets math</Text>
+  // Show simple loading state while fonts load
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, backgroundColor: COLORS.background, justifyContent: 'center', alignItems: 'center' }}>
+        <Text style={{ color: COLORS.textMuted }}>Loading...</Text>
       </View>
+    );
+  }
 
-      <Card style={{ borderRadius: 18, padding: 16 }}>
-        <View style={{ marginBottom: 12 }}>
-          <Text style={{ marginBottom: 6, color: '#334155', fontWeight: '600' }}>Email</Text>
-          <TextInput
-            placeholder="your@email.com"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            editable={!loading}
-            style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, backgroundColor: 'white' }}
-          />
-        </View>
-
-        <View style={{ marginBottom: 16 }}>
-          <Text style={{ marginBottom: 6, color: '#334155', fontWeight: '600' }}>Password</Text>
-          <TextInput
-            placeholder="••••••••"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            editable={!loading}
-            style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, backgroundColor: 'white' }}
-          />
-        </View>
-
-        <Button
-          title={loading ? 'Loading…' : isSignUp ? 'Sign Up' : 'Sign In'}
-          onPress={handleAuth}
-          disabled={loading}
-          size="lg"
-          style={{ borderRadius: 12 }}
-        />
-
-        <Pressable onPress={() => setIsSignUp(!isSignUp)} disabled={loading} style={{ marginTop: 12 }}>
-          <Text style={{ textAlign: 'center', color: '#4f46e5', fontWeight: '600' }}>
-            {isSignUp ? 'Already have an account? Sign In' : "Don’t have an account? Sign Up"}
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1, backgroundColor: COLORS.background }}
+    >
+      <ScrollView
+        contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingHorizontal: 32, paddingVertical: 48 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Logo & Title */}
+        <View style={{ alignItems: 'center', marginBottom: 48 }}>
+          <Text style={{
+            fontFamily: 'PlayfairDisplay_700Bold_Italic',
+            fontSize: 48,
+            color: COLORS.primary,
+            letterSpacing: -1,
+          }}>
+            MathMuse
           </Text>
-        </Pressable>
-      </Card>
-    </View>
+          <Text style={{
+            fontFamily: 'Nunito_400Regular',
+            fontSize: 18,
+            color: COLORS.textMuted,
+            marginTop: 8,
+          }}>
+            Where handwriting meets math
+          </Text>
+        </View>
+
+        {/* Auth Form */}
+        <View style={{ width: '100%', maxWidth: 400, alignSelf: 'center' }}>
+          {/* Email Input */}
+          <View style={{ marginBottom: 16 }}>
+            <Text style={{
+              fontFamily: 'Nunito_600SemiBold',
+              fontSize: 14,
+              color: COLORS.text,
+              marginBottom: 8,
+              marginLeft: 4,
+            }}>
+              Email
+            </Text>
+            <TextInput
+              placeholder="your@email.com"
+              placeholderTextColor="#A0A0A0"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              editable={!loading}
+              style={{
+                fontFamily: 'Nunito_400Regular',
+                fontSize: 16,
+                backgroundColor: COLORS.inputBg,
+                borderWidth: 2,
+                borderColor: COLORS.inputBorder,
+                borderRadius: 16,
+                paddingHorizontal: 18,
+                paddingVertical: 16,
+                color: COLORS.text,
+              }}
+            />
+          </View>
+
+          {/* Password Input */}
+          <View style={{ marginBottom: 24 }}>
+            <Text style={{
+              fontFamily: 'Nunito_600SemiBold',
+              fontSize: 14,
+              color: COLORS.text,
+              marginBottom: 8,
+              marginLeft: 4,
+            }}>
+              Password
+            </Text>
+            <TextInput
+              placeholder="••••••••"
+              placeholderTextColor="#A0A0A0"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              editable={!loading}
+              style={{
+                fontFamily: 'Nunito_400Regular',
+                fontSize: 16,
+                backgroundColor: COLORS.inputBg,
+                borderWidth: 2,
+                borderColor: COLORS.inputBorder,
+                borderRadius: 16,
+                paddingHorizontal: 18,
+                paddingVertical: 16,
+                color: COLORS.text,
+              }}
+            />
+          </View>
+
+          {/* Sign In / Sign Up Button */}
+          <Pressable
+            onPress={handleAuth}
+            disabled={loading}
+            style={({ pressed }) => ({
+              backgroundColor: pressed ? COLORS.primaryDark : COLORS.primary,
+              borderRadius: 50,
+              paddingVertical: 18,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: loading ? 0.7 : 1,
+              shadowColor: COLORS.primary,
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 8,
+              elevation: 4,
+            })}
+          >
+            <Text style={{
+              fontFamily: 'Nunito_700Bold',
+              fontSize: 18,
+              color: '#FFFFFF',
+            }}>
+              {loading ? 'Loading...' : isSignUp ? 'Create Account' : 'Sign In'}
+            </Text>
+          </Pressable>
+
+          {/* Toggle Sign Up / Sign In */}
+          <Pressable
+            onPress={() => setIsSignUp(!isSignUp)}
+            disabled={loading}
+            style={{ marginTop: 24, paddingVertical: 8 }}
+          >
+            <Text style={{
+              fontFamily: 'Nunito_600SemiBold',
+              fontSize: 15,
+              color: COLORS.primary,
+              textAlign: 'center',
+            }}>
+              {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* Fun footer for kids */}
+        <View style={{ marginTop: 48, alignItems: 'center' }}>
+          <Text style={{
+            fontFamily: 'Nunito_400Regular',
+            fontSize: 14,
+            color: COLORS.textMuted,
+            textAlign: 'center',
+          }}>
+            Write math, solve problems, have fun!
+          </Text>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
-

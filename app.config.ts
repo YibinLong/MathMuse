@@ -16,6 +16,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: 'mathmuse',
   userInterfaceStyle: 'automatic',
   newArchEnabled: false,
+  plugins: ['expo-font'],
   ios: { bundleIdentifier: 'com.mathmuse.app' },
   android: { package: 'com.mathmuse.app' },
   extra: {
