@@ -15,8 +15,8 @@ const COLORS = {
   white: '#FFFFFF',
 };
 
-// Group categories into pairs for 2-row horizontal scrolling layout
-function groupCategoriesInPairs<T>(items: T[]): T[][] {
+// Group categories into pairs for 2-row layout
+function groupIntoPairs<T>(items: T[]): T[][] {
   const pairs: T[][] = [];
   for (let i = 0; i < items.length; i += 2) {
     const pair = [items[i]];
@@ -201,17 +201,17 @@ export default function LearningPathScreen({ navigation }: LearningPathScreenPro
         </View>
       ) : (
         <FlatList
-          data={groupCategoriesInPairs(categories)}
-          keyExtractor={(_, index) => `col-${index}`}
+          data={groupIntoPairs(categories)}
+          keyExtractor={(_, index) => `pair-${index}`}
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{
             paddingHorizontal: 20,
-            paddingTop: 24,
-            paddingBottom: 40,
+            paddingTop: 16,
+            paddingBottom: 20,
           }}
           renderItem={({ item: pair }) => (
-            <View>
+            <View style={{ marginRight: 16 }}>
               {pair.map((category) => (
                 <CategoryCard
                   key={category.id}
