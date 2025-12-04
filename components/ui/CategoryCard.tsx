@@ -36,11 +36,12 @@ export function CategoryCard({
       style={({ pressed }) => [
         {
           backgroundColor: COLORS.cardBg,
-          borderRadius: 20,
-          padding: 20,
-          width: 280,
-          minHeight: 200,
-          marginRight: 16,
+          borderRadius: 24,
+          padding: 16,
+          width: 180,
+          height: 200,
+          marginRight: 12,
+          marginBottom: 12,
           borderWidth: 1,
           borderColor: COLORS.border,
           shadowColor: '#000',
@@ -57,10 +58,11 @@ export function CategoryCard({
       <Text
         style={{
           fontFamily: 'PlayfairDisplay_700Bold',
-          fontSize: 24,
+          fontSize: 18,
           color: COLORS.text,
-          marginBottom: 8,
+          marginBottom: 6,
         }}
+        numberOfLines={2}
       >
         {name}
       </Text>
@@ -69,10 +71,10 @@ export function CategoryCard({
       <Text
         style={{
           fontFamily: 'Nunito_400Regular',
-          fontSize: 14,
+          fontSize: 12,
           color: COLORS.textMuted,
-          lineHeight: 20,
-          marginBottom: 20,
+          lineHeight: 16,
+          marginBottom: 12,
         }}
         numberOfLines={2}
       >
@@ -81,37 +83,36 @@ export function CategoryCard({
 
       {/* Progress Section */}
       <View style={{ marginTop: 'auto' }}>
-        {/* Progress Pills */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+        {/* Progress Pills - stacked vertically for compact layout */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
           {/* Completed pill */}
           <View
             style={{
               flexDirection: 'row',
               alignItems: 'center',
               backgroundColor: color + '20',
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 20,
-              marginRight: 8,
+              paddingHorizontal: 10,
+              paddingVertical: 4,
+              borderRadius: 12,
             }}
           >
             <View
               style={{
-                width: 8,
-                height: 8,
-                borderRadius: 4,
+                width: 6,
+                height: 6,
+                borderRadius: 3,
                 backgroundColor: color,
-                marginRight: 6,
+                marginRight: 5,
               }}
             />
             <Text
               style={{
                 fontFamily: 'Nunito_600SemiBold',
-                fontSize: 13,
+                fontSize: 11,
                 color: COLORS.text,
               }}
             >
-              {completedCount} {completedCount === 1 ? 'set' : 'sets'}
+              {completedCount} sets
             </Text>
           </View>
 
@@ -121,19 +122,19 @@ export function CategoryCard({
               flexDirection: 'row',
               alignItems: 'center',
               backgroundColor: '#FEF3C7',
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 20,
+              paddingHorizontal: 10,
+              paddingVertical: 4,
+              borderRadius: 12,
             }}
           >
             <Text
               style={{
                 fontFamily: 'Nunito_600SemiBold',
-                fontSize: 13,
+                fontSize: 11,
                 color: '#B45309',
               }}
             >
-              {remainingCount} {remainingCount === 1 ? 'set' : 'sets'} left
+              {remainingCount} left
             </Text>
           </View>
         </View>
@@ -141,7 +142,7 @@ export function CategoryCard({
         {/* Progress bar */}
         <View
           style={{
-            height: 6,
+            height: 5,
             backgroundColor: '#E5E7EB',
             borderRadius: 3,
             overflow: 'hidden',
@@ -161,12 +162,12 @@ export function CategoryCard({
         <Text
           style={{
             fontFamily: 'Nunito_400Regular',
-            fontSize: 12,
+            fontSize: 11,
             color: COLORS.textMuted,
-            marginTop: 8,
+            marginTop: 6,
           }}
         >
-          {completedCount} of {totalCount} sets complete
+          {completedCount} of {totalCount} complete
         </Text>
       </View>
     </Pressable>

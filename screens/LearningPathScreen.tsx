@@ -15,6 +15,19 @@ const COLORS = {
   white: '#FFFFFF',
 };
 
+// Group categories into pairs for 2-row horizontal scrolling layout
+function groupCategoriesInPairs<T>(items: T[]): T[][] {
+  const pairs: T[][] = [];
+  for (let i = 0; i < items.length; i += 2) {
+    const pair = [items[i]];
+    if (i + 1 < items.length) {
+      pair.push(items[i + 1]);
+    }
+    pairs.push(pair);
+  }
+  return pairs;
+}
+
 export default function LearningPathScreen({ navigation }: LearningPathScreenProps) {
   const session = useSessionStore((s) => s.session);
   const signOut = useSessionStore((s) => s.signOut);
@@ -173,10 +186,23 @@ export default function LearningPathScreen({ navigation }: LearningPathScreenPro
             </Text>
           </Pressable>
         </View>
+      ) : categories.length === 0 ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 }}>
+          <Text
+            style={{
+              fontFamily: 'Nunito_400Regular',
+              fontSize: 16,
+              color: COLORS.textMuted,
+              textAlign: 'center',
+            }}
+          >
+            No categories available yet.{'\n'}Check back soon!
+          </Text>
+        </View>
       ) : (
         <FlatList
-          data={categories}
-          keyExtractor={(item) => item.id}
+          data={groupCategoriesInPairs(categories)}
+          keyExtractor={(_, index) => `col-${index}`}
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{
@@ -184,30 +210,21 @@ export default function LearningPathScreen({ navigation }: LearningPathScreenPro
             paddingTop: 24,
             paddingBottom: 40,
           }}
-          renderItem={({ item }) => (
-            <CategoryCard
-              name={item.name}
-              description={item.description}
-              completedCount={item.completedCount}
-              totalCount={item.totalCount}
-              color={item.color}
-              onPress={() => handleCategoryPress(item)}
-            />
-          )}
-          ListEmptyComponent={
-            <View style={{ padding: 40, alignItems: 'center' }}>
-              <Text
-                style={{
-                  fontFamily: 'Nunito_400Regular',
-                  fontSize: 16,
-                  color: COLORS.textMuted,
-                  textAlign: 'center',
-                }}
-              >
-                No categories available yet.{'\n'}Check back soon!
-              </Text>
+          renderItem={({ item: pair }) => (
+            <View>
+              {pair.map((category) => (
+                <CategoryCard
+                  key={category.id}
+                  name={category.name}
+                  description={category.description}
+                  completedCount={category.completedCount}
+                  totalCount={category.totalCount}
+                  color={category.color}
+                  onPress={() => handleCategoryPress(category)}
+                />
+              ))}
             </View>
-          }
+          )}
         />
       )}
     </SafeAreaView>
