@@ -65,14 +65,6 @@ export default function AuthScreen({ onAuthSuccess }: { onAuthSuccess: () => voi
           }}>
             MathMuse
           </Text>
-          <Text style={{
-            fontFamily: 'Nunito_400Regular',
-            fontSize: 18,
-            color: COLORS.textMuted,
-            marginTop: 8,
-          }}>
-            Where handwriting meets math
-          </Text>
         </View>
 
         {/* Auth Form */}
